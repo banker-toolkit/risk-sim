@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v7.0 - ADMIN INSIGHTS & HISTORY
- * - Feature: Player "Mission Log" (History) restored and fixed.
- * - Feature: Admin Screen shows EXACT decision details per team.
- * - Logic: v6.0 Math (Acquisition Cost, IFRS 9 Provisions) retained.
+ * CREDIT CARD RISK SIMULATION v8.0 - TIGHT FEEDBACK & SENSITIVITY
+ * - Logic: Loss Lag reduced to 1 Quarter (Round N feels Round N-1).
+ * - UI: "Impact Analysis" expandable panels for every slider.
+ * - UI: Explicit sensitivity data (Loss/Return/Cap/Prov) displayed.
  * - Port: 3000
  */
 
@@ -81,7 +81,7 @@ const INITIAL_TEAM_STATE = {
     roe: 12.0,
     loss_rate: 2.5,
     provisions: 2.5, 
-    risk_history: [2.5, 2.5, 2.5],
+    risk_history: [2.5], // Initialized with 1 historical point
     decisions: {}, 
     history_log: [],
     cumulative_profit: 0,
@@ -161,7 +161,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (1-QUARTER LAG) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -170,6 +170,7 @@ function runSimulationEngine() {
             vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
         };
 
+        // INPUTS
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
         if(dec.line==='Conservative') {lineRisk=0.85; volMult-=0.04;} 
@@ -184,24 +185,34 @@ function runSimulationEngine() {
         let collBenefit = dec.coll * 0.15; 
         let collCost = dec.coll * 0.25;
 
+        // RISK
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
 
+        // ACQUISITION COST
         let acqCost = 0;
         if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; 
         if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   
 
+        // GROWTH
         const growth = volMult * cliBal * btBal * freezeImpact;
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        const lagIndex = team.risk_history.length - 3; 
+        // --- LOSSES (1-QUARTER LAG) ---
+        // We look at the Risk Index from 2 steps ago in the array 
+        // (Step 0=History, Step 1=Last Round, Step 2=Current Round)
+        // Actually, for 1-Quarter Lag, we want the risk from the PREVIOUS round.
+        const lagIndex = team.risk_history.length - 2; 
+        // Ensure we don't go out of bounds
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
+        
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
+        // PROVISIONS (Immediate)
         team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.8 : 1.1) * 0.8; 
         
         const revenue = team.receivables * 0.14; 
@@ -226,7 +237,7 @@ function runSimulationEngine() {
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli+" | BT:"+dec.bt,
+            decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli,
             impact: "ROE: "+team.roe.toFixed(1)+"% | Loss: "+team.loss_rate.toFixed(1)+"%"
         });
     });
@@ -244,7 +255,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v7.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v8.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -252,7 +263,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v7.0</title>
+    <title>CRO Cockpit v8.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         :root { --bg: #0b0f19; --glass: rgba(16, 24, 40, 0.95); --blue: #00f3ff; --green: #00ff9d; --red: #ff0055; --amber: #ffaa00; }
@@ -275,23 +286,29 @@ const frontendCode = `
 
         /* CONTROLS */
         .control-scroll-area { flex:1; overflow-y:auto; padding-right:5px; margin-bottom:10px; border-bottom:1px solid #333; }
-        .control-row { margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px; }
+        .control-row { margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px; position:relative; }
         .control-row label { display: block; color: var(--blue); margin-bottom: 5px; font-weight: bold; text-transform:uppercase; font-size:0.8em; }
-        .ctx-txt { font-size: 0.8em; color: #888; margin-top: 5px; display: block; }
+        
         .btn-group { display: flex; gap: 2px; margin-top:5px; background:#111; padding:2px; }
         .btn-opt { flex: 1; background: #222; color: #666; padding: 8px; cursor: pointer; text-align: center; font-size:0.8em; border:1px solid #333; transition:0.2s; }
         .btn-opt:hover { background: #333; }
         .btn-opt.selected { background: var(--blue); color: #000; font-weight: bold; border-color:var(--blue); box-shadow: 0 0 10px var(--blue); }
         input[type=range] { width: 100%; accent-color: var(--blue); margin-top:5px; cursor:pointer; }
+        
+        /* SENSITIVITY PANEL */
+        .sens-btn { background:none; border:none; color:#666; font-size:0.8em; cursor:pointer; margin-top:5px; }
+        .sens-btn:hover { color:var(--blue); }
+        .sens-panel { background:#111; border-top:1px solid #333; padding:10px; margin-top:5px; display:none; grid-template-columns: 1fr 1fr; gap:10px; font-size:0.8em; }
+        .sens-panel.open { display:grid; }
+        .sens-item { color:#aaa; }
+        .sens-val { color:var(--green); font-weight:bold; float:right; }
+        .sens-val.neg { color:var(--red); }
 
-        /* HISTORY SIDE PANEL */
+        /* LAYOUT HELPERS */
         #side-panel { position: absolute; top: 0; right: 0; width: 0; height: 100%; background: #080808; border-left: 1px solid var(--blue); transition: 0.3s; overflow-y: auto; z-index: 100; display:flex; flex-direction:column; }
         #side-panel.open { width: 350px; padding: 20px; box-shadow: -10px 0 30px rgba(0,0,0,0.9); }
         .log-entry { border-bottom: 1px solid #333; padding: 10px 0; font-size: 0.85em; }
-        .log-round { color: var(--amber); font-weight: bold; }
-        .log-detail { color: #aaa; margin-top:3px; }
-
-        /* LAYOUT HELPERS */
+        
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
@@ -315,7 +332,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v7.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v8.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -358,11 +375,18 @@ const frontendCode = `
                     <div class="control-scroll-area">
                         <div class="control-row">
                             <div style="display:flex; justify-content:space-between;">
-                                <label>1. ACQUISITION VOLUME</label>
-                                <span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span>
+                                <label>1. ACQUISITION VOLUME</label><span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span>
                             </div>
                             <input type="range" id="i-vol" min="1" max="5" value="3" oninput="updContext()">
+                            <button class="sens-btn" onclick="toggleSens('sens-vol')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-vol" class="sens-panel">
+                                <div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div>
+                                <div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div>
+                                <div class="sens-item">Cap Usage <span class="sens-val neg">+2.0%</span></div>
+                                <div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.5%</span></div>
+                            </div>
                         </div>
+
                         <div class="control-row">
                             <label>2. INITIAL LINE ASSIGNMENT</label>
                             <div class="btn-group" id="grp-line">
@@ -370,17 +394,39 @@ const frontendCode = `
                                 <div class="btn-opt selected" onclick="selBtn('grp-line', 'Balanced')">Balanced</div>
                                 <div class="btn-opt" onclick="selBtn('grp-line', 'Aggressive')">Aggressive</div>
                             </div>
+                            <button class="sens-btn" onclick="toggleSens('sens-line')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-line" class="sens-panel">
+                                <div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div>
+                                <div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div>
+                                <div class="sens-item">Cap Usage <span class="sens-val neg">+5.0%</span></div>
+                                <div class="sens-item">Cost Impact <span class="sens-val">None</span></div>
+                            </div>
                         </div>
+
                         <div class="control-row">
                             <label>3. UPSELL AGGRESSION</label>
                             <input type="range" id="i-cli" min="1" max="5" value="3" oninput="updContext()">
-                            <span id="ctx-cli" class="ctx-txt">Strategy: Standard</span>
+                            <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-cli" class="sens-panel">
+                                <div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div>
+                                <div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div>
+                                <div class="sens-item">Cap Usage <span class="sens-val neg">+1.5%</span></div>
+                                <div class="sens-item">Loss Lag <span class="sens-val neg">Med</span></div>
+                            </div>
                         </div>
+
                         <div class="control-row">
                             <label>4. BALANCE TRANSFER PUSH</label>
                             <input type="range" id="i-bt" min="1" max="5" value="1" oninput="updContext()">
-                            <span id="ctx-bt" class="ctx-txt">Focus: Organic Only</span>
+                            <button class="sens-btn" onclick="toggleSens('sens-bt')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-bt" class="sens-panel">
+                                <div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div>
+                                <div class="sens-item">Churn Risk <span class="sens-val neg">High</span></div>
+                                <div class="sens-item">Acq Cost <span class="sens-val neg">+0.3%</span></div>
+                                <div class="sens-item">Prov Impact <span class="sens-val">Low</span></div>
+                            </div>
                         </div>
+
                         <div class="control-row">
                             <label>5. PORTFOLIO ACTIONS</label>
                             <div class="btn-group" id="grp-frz">
@@ -388,26 +434,40 @@ const frontendCode = `
                                 <div class="btn-opt" onclick="selBtn('grp-frz', 'Selective')">Selective</div>
                                 <div class="btn-opt" onclick="selBtn('grp-frz', 'Reactive')">Reactive</div>
                             </div>
+                            <button class="sens-btn" onclick="toggleSens('sens-frz')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-frz" class="sens-panel">
+                                <div class="sens-item">Return Impact <span class="sens-val neg">-5.0%</span></div>
+                                <div class="sens-item">Loss Reduction <span class="sens-val">+0.5%</span></div>
+                                <div class="sens-item">Cap Relief <span class="sens-val">+2.0%</span></div>
+                                <div class="sens-item">Cost Impact <span class="sens-val">Low</span></div>
+                            </div>
                         </div>
+
                         <div class="control-row">
                             <label>6. COLLECTIONS INTENSITY</label>
                             <input type="range" id="i-coll" min="1" max="5" value="3" oninput="updContext()">
-                            <span id="ctx-coll" class="ctx-txt">Effort: Standard</span>
+                            <button class="sens-btn" onclick="toggleSens('sens-coll')">[?] IMPACT ANALYSIS</button>
+                            <div id="sens-coll" class="sens-panel">
+                                <div class="sens-item">Loss Reduction <span class="sens-val">+0.2%</span></div>
+                                <div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3%</span></div>
+                                <div class="sens-item">Return Impact <span class="sens-val neg">None</span></div>
+                                <div class="sens-item">Cap Usage <span class="sens-val">Neutral</span></div>
+                            </div>
                         </div>
                     </div>
                     <button id="sub-btn" class="main-btn" onclick="submit()" disabled>WAITING FOR MARKET...</button>
                 </div>
+                
                 <div class="glass" style="width: 30%; display:flex; flex-direction:column;">
                     <h4 style="color:var(--red); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CEO PRIORITY</h4>
                     <div id="ceo-msg" style="font-style:italic; margin-bottom:20px; font-size:1.1em; color:#ddd; flex:1; overflow-y:auto;">"System Initializing..."</div>
-                    
                     <button onclick="toggleHistory()" style="background:none; border:1px solid var(--amber); color:var(--amber); padding:10px; margin-bottom:20px; cursor:pointer;">> VIEW MISSION LOG</button>
-                    
                     <div style="margin-top:auto;">
                         <div style="font-size:0.8em; color:#666;">CURRENT SCENARIO</div>
                         <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">-</div>
                     </div>
                 </div>
+                
                 <div id="side-panel">
                     <button onclick="toggleHistory()" style="background:none; border:none; color:white; cursor:pointer; text-align:left; font-size:1.2em; margin-bottom:20px;">X CLOSE LOG</button>
                     <h3 style="color:var(--blue); border-bottom:1px solid #333; padding-bottom:10px;">DECISION HISTORY</h3>
@@ -440,15 +500,15 @@ const frontendCode = `
             if(grp === 'grp-frz') decisions.freeze = val;
             updContext();
         }
+        function toggleSens(id) {
+            document.getElementById(id).classList.toggle('open');
+        }
         function updContext() {
             const v = document.getElementById('i-vol').value;
             const c = document.getElementById('i-cli').value;
             const b = document.getElementById('i-bt').value;
             const cl = document.getElementById('i-coll').value;
             document.getElementById('ctx-vol').innerText = v==1?"Low Risk": (v==5?"High Risk":"Balanced");
-            document.getElementById('ctx-cli').innerText = "Strategy: " + (c>3?"Aggressive (+Risk)":"Standard");
-            document.getElementById('ctx-bt').innerText = "Focus: " + (b>1?"Push Volume (+Churn)":"Organic Only");
-            document.getElementById('ctx-coll').innerText = "Effort: " + (cl>3?"Intense (+Cost)":"Standard");
         }
         function submit() {
             const data = {
@@ -532,7 +592,6 @@ const frontendCode = `
             l.innerHTML = '';
             Object.keys(s.teams).forEach(t => {
                 const team = s.teams[t];
-                // DETAILED DECISION PARSING FOR ADMIN
                 let decStatus = '<span style="color:var(--red)">WAITING...</span>';
                 let decDetail = '';
                 if(team.decisions[s.round]) {
@@ -543,15 +602,7 @@ const frontendCode = `
                         'CLI: <b>'+d.cli+'</b> | BT: <b>'+d.bt+'</b> | Frz: <b>'+d.freeze+'</b>' +
                         '</div>';
                 }
-
-                l.innerHTML += '<div class="glass" style="padding:10px;">' +
-                    '<div style="display:flex; justify-content:space-between;">' +
-                        '<div style="color:var(--blue); font-weight:bold; font-size:1.2em;">'+t+'</div>' +
-                        '<div>'+decStatus+'</div>' +
-                    '</div>' +
-                    '<div style="font-size:0.9em; margin-top:5px;">ROE: '+team.roe.toFixed(1)+'% | Cap: '+team.capital_ratio.toFixed(1)+'%</div>' +
-                    decDetail +
-                '</div>';
+                l.innerHTML += '<div class="glass" style="padding:10px;"><div style="display:flex; justify-content:space-between;"><div style="color:var(--blue); font-weight:bold; font-size:1.2em;">'+t+'</div><div>'+decStatus+'</div></div><div style="font-size:0.9em; margin-top:5px;">ROE: '+team.roe.toFixed(1)+'% | Cap: '+team.capital_ratio.toFixed(1)+'%</div>'+decDetail+'</div>';
             });
         }
     </script>
