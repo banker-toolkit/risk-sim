@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v6.0 - MATH LOGIC FIX
- * - Fixed: ROE Differentiation in Round 1
- * - Logic: Provisions now look at CURRENT Risk (IFRS 9/CECL), Losses remain LAGGED.
- * - Logic: Added Acquisition Costs (Growing fast hurts short-term ROE).
+ * CREDIT CARD RISK SIMULATION v7.0 - ADMIN INSIGHTS & HISTORY
+ * - Feature: Player "Mission Log" (History) restored and fixed.
+ * - Feature: Admin Screen shows EXACT decision details per team.
+ * - Logic: v6.0 Math (Acquisition Cost, IFRS 9 Provisions) retained.
  * - Port: 3000
  */
 
@@ -161,7 +161,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (UPDATED) ---
+// --- 3. MATH ENGINE ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -170,7 +170,6 @@ function runSimulationEngine() {
             vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
         };
 
-        // --- INPUT FACTORS ---
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
         if(dec.line==='Conservative') {lineRisk=0.85; volMult-=0.04;} 
@@ -185,49 +184,37 @@ function runSimulationEngine() {
         let collBenefit = dec.coll * 0.15; 
         let collCost = dec.coll * 0.25;
 
-        // --- RISK CALCULATION ---
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
 
-        // --- ACQUISITION COST (New) ---
-        // Growing faster than average (3) incurs explicit OpEx (Marketing/Origination)
-        // This creates the "J-Curve" - Aggressive teams take a P&L hit immediately
         let acqCost = 0;
-        if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; // 0.5% of receivables per tick
-        if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   // BTs are expensive
+        if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; 
+        if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   
 
-        // --- BALANCE GROWTH ---
         const growth = volMult * cliBal * btBal * freezeImpact;
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // --- LOSSES (LAGGED) ---
         const lagIndex = team.risk_history.length - 3; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // --- PROVISIONS (CURRENT/FORWARD LOOKING) ---
-        // FIX: Provisions are based on CURRENT Risk Index, not Historical.
-        // This ensures Aggressive teams see provisions spike immediately.
         team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.8 : 1.1) * 0.8; 
         
-        // --- PROFIT CALCULATION ---
         const revenue = team.receivables * 0.14; 
         const opEx = team.receivables * 0.02; 
         const collEx = team.receivables * (collCost / 100);
-        const acqEx = team.receivables * (acqCost / 100); // New Expense Line
+        const acqEx = team.receivables * (acqCost / 100);
         
-        // Profit = Rev - RealizedLoss - Provisions - OpEx - Collections - Acquisition
         const profit = revenue - (team.receivables * (team.loss_rate/100)) 
                              - (team.receivables * (team.provisions/100)) 
                              - opEx - collEx - acqEx;
         
         team.roe = (profit / (team.receivables * 0.12)) * 100;
         
-        // --- ACCUMULATION ---
         team.cumulative_profit += profit;
         const economicCapital = (team.receivables * 0.14) * (histRisk/2); 
         team.cumulative_capital_usage += economicCapital;
@@ -239,8 +226,8 @@ function runSimulationEngine() {
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            decision: "Vol: "+dec.vol+", Line: "+dec.line,
-            impact: "ROE: "+team.roe.toFixed(1)+"%, Loss: "+team.loss_rate.toFixed(1)+"%"
+            decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli+" | BT:"+dec.bt,
+            impact: "ROE: "+team.roe.toFixed(1)+"% | Loss: "+team.loss_rate.toFixed(1)+"%"
         });
     });
 }
@@ -257,7 +244,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v6.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v7.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -265,7 +252,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v6.0</title>
+    <title>CRO Cockpit v7.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         :root { --bg: #0b0f19; --glass: rgba(16, 24, 40, 0.95); --blue: #00f3ff; --green: #00ff9d; --red: #ff0055; --amber: #ffaa00; }
@@ -276,12 +263,17 @@ const frontendCode = `
         .ticker-move { display: inline-block; white-space: nowrap; padding-right: 100%; animation: ticker-anim 45s linear infinite; }
         .ticker-item { display: inline-block; padding: 0 30px; color: var(--amber); font-family: 'Courier New', monospace; font-size: 0.95em; }
         @keyframes ticker-anim { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
+        
         .screen { width: 100%; height: 100%; display:none; flex-direction:column; }
         .screen.active { display:flex; }
         .glass { background: var(--glass); border: 1px solid #333; box-shadow: 0 0 20px rgba(0,0,0,0.8); border-radius: 4px; padding: 15px; display:flex; flex-direction:column; }
+        
+        /* HUD */
         #hud { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
         .metric { text-align: center; border-top: 2px solid var(--blue); padding: 10px; } 
         .val { font-size: 1.8em; font-weight: bold; letter-spacing: 1px; }
+
+        /* CONTROLS */
         .control-scroll-area { flex:1; overflow-y:auto; padding-right:5px; margin-bottom:10px; border-bottom:1px solid #333; }
         .control-row { margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px; }
         .control-row label { display: block; color: var(--blue); margin-bottom: 5px; font-weight: bold; text-transform:uppercase; font-size:0.8em; }
@@ -291,10 +283,20 @@ const frontendCode = `
         .btn-opt:hover { background: #333; }
         .btn-opt.selected { background: var(--blue); color: #000; font-weight: bold; border-color:var(--blue); box-shadow: 0 0 10px var(--blue); }
         input[type=range] { width: 100%; accent-color: var(--blue); margin-top:5px; cursor:pointer; }
+
+        /* HISTORY SIDE PANEL */
+        #side-panel { position: absolute; top: 0; right: 0; width: 0; height: 100%; background: #080808; border-left: 1px solid var(--blue); transition: 0.3s; overflow-y: auto; z-index: 100; display:flex; flex-direction:column; }
+        #side-panel.open { width: 350px; padding: 20px; box-shadow: -10px 0 30px rgba(0,0,0,0.9); }
+        .log-entry { border-bottom: 1px solid #333; padding: 10px 0; font-size: 0.85em; }
+        .log-round { color: var(--amber); font-weight: bold; }
+        .log-detail { color: #aaa; margin-top:3px; }
+
+        /* LAYOUT HELPERS */
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
         .score-card { width: 60%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; max-height:80vh; overflow-y:auto; }
+
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
         button.main-btn:hover:not(:disabled) { background: var(--blue); color: #000; box-shadow: 0 0 20px var(--blue); }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
@@ -313,7 +315,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v6.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v7.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -331,7 +333,7 @@ const frontendCode = `
                     <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
                 </div>
             </div>
-            <div id="adm-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:10px;"></div>
+            <div id="adm-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;"></div>
         </div>
         <div id="team-ui" class="screen" style="background: radial-gradient(circle at center, #1a2c4e 0%, #000 100%);">
             <div style="padding: 10px 20px;">
@@ -398,10 +400,18 @@ const frontendCode = `
                 <div class="glass" style="width: 30%; display:flex; flex-direction:column;">
                     <h4 style="color:var(--red); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CEO PRIORITY</h4>
                     <div id="ceo-msg" style="font-style:italic; margin-bottom:20px; font-size:1.1em; color:#ddd; flex:1; overflow-y:auto;">"System Initializing..."</div>
+                    
+                    <button onclick="toggleHistory()" style="background:none; border:1px solid var(--amber); color:var(--amber); padding:10px; margin-bottom:20px; cursor:pointer;">> VIEW MISSION LOG</button>
+                    
                     <div style="margin-top:auto;">
                         <div style="font-size:0.8em; color:#666;">CURRENT SCENARIO</div>
                         <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">-</div>
                     </div>
+                </div>
+                <div id="side-panel">
+                    <button onclick="toggleHistory()" style="background:none; border:none; color:white; cursor:pointer; text-align:left; font-size:1.2em; margin-bottom:20px;">X CLOSE LOG</button>
+                    <h3 style="color:var(--blue); border-bottom:1px solid #333; padding-bottom:10px;">DECISION HISTORY</h3>
+                    <div id="hist-list"></div>
                 </div>
             </div>
         </div>
@@ -451,6 +461,9 @@ const frontendCode = `
             };
             sEmit('submit_decision', data);
             document.getElementById('lock-overlay').classList.remove('hidden');
+        }
+        function toggleHistory() {
+            document.getElementById('side-panel').classList.toggle('open');
         }
         socket.on('auth_success', (res) => {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
@@ -506,6 +519,12 @@ const frontendCode = `
             document.getElementById('d-prov').innerText = d.provisions.toFixed(1) + "%";
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
             document.getElementById('d-rec').innerText = Math.round(d.receivables);
+            
+            const log = document.getElementById('hist-list');
+            log.innerHTML = "";
+            d.history_log.forEach(h => {
+                log.innerHTML += '<div class="log-entry"><div class="log-round">Round '+h.round+' ('+h.scenario+')</div><div class="log-detail">'+h.decision+'</div><div style="color:var(--green)">'+h.impact+'</div></div>';
+            });
         }
         function updAdmin(s) {
             document.getElementById('adm-rd').innerText = s.round;
@@ -513,7 +532,26 @@ const frontendCode = `
             l.innerHTML = '';
             Object.keys(s.teams).forEach(t => {
                 const team = s.teams[t];
-                l.innerHTML += '<div class="glass" style="padding:10px;"><div style="color:var(--blue); font-weight:bold;">'+t+'</div><div style="font-size:0.8em;">ROE: '+team.roe.toFixed(1)+'% | Cap: '+team.capital_ratio.toFixed(1)+'%</div><div style="margin-top:5px;">'+(team.decisions[s.round]?'<span style="color:var(--green)">CONFIRMED</span>':'<span style="color:var(--red)">WAITING</span>')+'</div></div>';
+                // DETAILED DECISION PARSING FOR ADMIN
+                let decStatus = '<span style="color:var(--red)">WAITING...</span>';
+                let decDetail = '';
+                if(team.decisions[s.round]) {
+                    const d = team.decisions[s.round];
+                    decStatus = '<span style="color:var(--green)">LOCKED</span>';
+                    decDetail = '<div style="margin-top:5px; font-size:0.8em; color:#aaa; border-top:1px solid #333; padding-top:5px;">' +
+                        'Vol: <b style="color:white">'+d.vol+'</b> | Line: <b style="color:white">'+d.line+'</b><br>' +
+                        'CLI: <b>'+d.cli+'</b> | BT: <b>'+d.bt+'</b> | Frz: <b>'+d.freeze+'</b>' +
+                        '</div>';
+                }
+
+                l.innerHTML += '<div class="glass" style="padding:10px;">' +
+                    '<div style="display:flex; justify-content:space-between;">' +
+                        '<div style="color:var(--blue); font-weight:bold; font-size:1.2em;">'+t+'</div>' +
+                        '<div>'+decStatus+'</div>' +
+                    '</div>' +
+                    '<div style="font-size:0.9em; margin-top:5px;">ROE: '+team.roe.toFixed(1)+'% | Cap: '+team.capital_ratio.toFixed(1)+'%</div>' +
+                    decDetail +
+                '</div>';
             });
         }
     </script>
