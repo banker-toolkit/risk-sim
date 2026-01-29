@@ -1,8 +1,10 @@
 /**
- * CREDIT CARD RISK SIMULATION v13.0 - TRANSMISSION EDITION
- * - Feature: Admin manually triggers CEO Message (Screen takeover).
- * - UI Fix: Increased Chart padding to prevent label clipping.
- * - Content: "Narcissist CEO" scripts retained.
+ * CREDIT CARD RISK SIMULATION v14.0 - DEEP SPACE EDITION
+ * - Visual: Saturn Front & Center, Milky Way Background.
+ * - Visual: Graph Zones Removed (True Fog of War).
+ * - UI: Receivables in ₹ Crores (Starting at 1000 Cr).
+ * - UI: Explicit Decision Labels (Acq/Limit/Upsell).
+ * - Content: Scenario Name Hidden from Players.
  * - Logic: 1-Quarter Lag, Acquisition Cost, IFRS 9 Provisions.
  * - Port: 3000
  */
@@ -35,7 +37,7 @@ const SCENARIOS = {
 };
 
 const INITIAL_TEAM_STATE = {
-    receivables: 100, 
+    receivables: 1000, // Starts at 1000 Cr
     capital_ratio: 14.0, 
     roe: 12.0,
     loss_rate: 2.5,
@@ -80,7 +82,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_action', (action) => {
-        // ADMIN TRIGGER: START ROUND
         if (action.type === 'START_ROUND') {
             if (gameState.status === 'ENDGAME') return; 
             if (gameState.round >= 9) {
@@ -96,23 +97,20 @@ io.on('connection', (socket) => {
             else if (gameState.round <= 6) gameState.scenario = 'B';
             else gameState.scenario = 'C';
 
-            // Generate News (Standard)
+            // Generate News
             const NEWS_DB = [ 
-                "BBG: Markets await fed decision", "CNBC: Sector rotation in progress", "WSJ: Earnings season kicks off" 
+                "BBG: Trading volume spikes", "CNBC: Analyst downgrade on sector", "WSJ: Consumer credit data delayed" 
             ]; 
-            // (Keeping news simple to save space, focused on CEO now)
             gameState.news_feed = NEWS_DB; 
             
             io.emit('state_update', gameState);
         }
         
-        // ADMIN TRIGGER: PUSH CEO MESSAGE
         if (action.type === 'PUSH_CEO') {
             const text = CEO_SCRIPTS[gameState.round] || "No directive available.";
             io.emit('ceo_transmission', { text: text, round: gameState.round });
         }
         
-        // ADMIN TRIGGER: END ROUND
         if (action.type === 'END_ROUND') {
             gameState.status = 'CLOSED';
             runSimulationEngine();
@@ -172,7 +170,7 @@ function runSimulationEngine() {
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // LOSSES (1-LAG)
+        // LOSSES
         const lagIndex = team.risk_history.length - 2; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
@@ -203,6 +201,7 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
+        // ARROW LOGIC
         let volArrow = "↔"; let lineArrow = "↔";
         const prevDec = team.decisions[gameState.round - 1];
         if(prevDec) {
@@ -213,14 +212,19 @@ function runSimulationEngine() {
             if(riskScore(dec.line) < riskScore(prevDec.line)) lineArrow = "↓";
         }
 
+        // CLEARER LABELS FOR GRAPH
+        // Translating technical terms to readable labels
+        let lineShort = dec.line === 'Conservative' ? 'Cons' : (dec.line === 'Aggressive' ? 'Aggr' : 'Bal');
+        
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            dec_summ: volArrow+"Vol | "+lineArrow+"Line | "+dec.line.substring(0,3),
-            met_summ: "Loss:"+team.loss_rate.toFixed(1)+"% | Cap:"+team.capital_ratio.toFixed(1)+"%",
+            // IMPROVED LABELS
+            dec_summ: `${volArrow} Acq | ${lineArrow} Limit (${lineShort})`,
+            met_summ: `Loss: ${team.loss_rate.toFixed(1)}% | Cap: ${team.capital_ratio.toFixed(1)}%`,
             
-            decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli,
-            impact: "ROE: "+team.roe.toFixed(1)+"% | Loss: "+team.loss_rate.toFixed(1)+"%"
+            decision: `Vol:${dec.vol} | Line:${dec.line}`,
+            impact: `ROE: ${team.roe.toFixed(1)}%`
         });
     });
 }
@@ -237,7 +241,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v13.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v14.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -245,7 +249,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v13.0</title>
+    <title>CRO Cockpit v14.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -278,7 +282,7 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG (MILKY WAY) */
+        /* MISSION LOG (DEEP SPACE) */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
             background: radial-gradient(circle at center, #0B1021 0%, #000 100%);
@@ -287,8 +291,18 @@ const frontendCode = `
         #mission-control.open { display:flex; }
         
         .celestial-body { position: absolute; opacity: 0.6; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
+        
+        /* THE MILKY WAY */
         #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.4; z-index:0; }
         
+        /* SATURN - FRONT AND CENTER */
+        #saturn { 
+            bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); 
+            width: 700px; height: 500px; 
+            background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; 
+            opacity: 0.3; z-index: 0;
+        }
+
         .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
         .satellite { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 20; background:white; }
         .sat-green { box-shadow: 0 0 15px #00ff9d; animation: pulse-g 3s infinite; }
@@ -346,7 +360,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v13.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v14.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -395,7 +409,7 @@ const frontendCode = `
                             <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>2. INITIAL LINE ASSIGNMENT</label>
+                            <label>2. INITIAL CREDIT LIMIT</label>
                             <div class="btn-group" id="grp-line">
                                 <div class="btn-opt" onclick="selBtn('grp-line', 'Conservative')">Conservative</div>
                                 <div class="btn-opt selected" onclick="selBtn('grp-line', 'Balanced')">Balanced</div>
@@ -405,7 +419,7 @@ const frontendCode = `
                             <div id="sens-line" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>3. UPSELL AGGRESSION</label>
+                            <label>3. UPSELL (CLI) STRATEGY</label>
                             <input type="range" id="i-cli" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
                             <div id="sens-cli" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div></div>
@@ -441,7 +455,7 @@ const frontendCode = `
                     <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); margin-bottom:20px; font-size:1em;">> VIEW MISSION LOG</button>
                     <div style="margin-top:auto;">
                         <div style="font-size:0.8em; color:#666;">CURRENT SCENARIO</div>
-                        <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">-</div>
+                        <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">MARKET DATA: ENCRYPTED</div>
                     </div>
                 </div>
             </div>
@@ -450,6 +464,7 @@ const frontendCode = `
     
     <div id="mission-control">
         <div id="milky-way" class="celestial-body"></div>
+        <div id="saturn" class="celestial-body"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; z-index:10; width:100%;">
             <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px; text-shadow:0 0 10px var(--blue);">Strategic Trajectory</h2>
             <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
@@ -526,19 +541,7 @@ const frontendCode = `
             const ctx = document.getElementById('missionChart').getContext('2d');
             if(missionChart) missionChart.destroy();
 
-            // Background Zones (Subtle)
-            const bgPlugin = {
-                id: 'bgPlugin',
-                beforeDraw: (chart) => {
-                    const {ctx, chartArea: {left, top, width, height}} = chart;
-                    ctx.save();
-                    ctx.fillStyle = 'rgba(0, 255, 157, 0.03)'; ctx.fillRect(left, top, width * 0.33, height);
-                    ctx.fillStyle = 'rgba(255, 170, 0, 0.03)'; ctx.fillRect(left + (width*0.33), top, width * 0.33, height);
-                    ctx.fillStyle = 'rgba(255, 0, 85, 0.05)'; ctx.fillRect(left + (width*0.66), top, width * 0.34, height);
-                    ctx.restore();
-                }
-            };
-
+            // NO BACKGROUND STRIPES - FOG OF WAR
             missionChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -557,8 +560,7 @@ const frontendCode = `
                         x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
                     },
                     animation: { onComplete: () => { updateSatellites(sortedLog); } }
-                },
-                plugins: [bgPlugin]
+                }
             });
         }
 
@@ -611,11 +613,10 @@ const frontendCode = `
             }
         });
         
-        // NEW: CEO TRANSMISSION LISTENER
         socket.on('ceo_transmission', (msg) => {
             document.getElementById('trans-text').innerText = msg.text;
             document.getElementById('ceo-overlay').classList.add('active');
-            document.getElementById('ceo-msg').innerText = '"' + msg.text + '"'; // Also update sidebar
+            document.getElementById('ceo-msg').innerText = '"' + msg.text + '"'; 
         });
 
         socket.on('state_update', (s) => {
@@ -632,7 +633,6 @@ const frontendCode = `
                 return;
             }
             document.getElementById('rd-ind').innerText = "ROUND " + s.round;
-            document.getElementById('scen-nm').innerText = s.scenario === 'A' ? "EXPANSION" : (s.scenario === 'B' ? "LATE CYCLE" : "SHOCK");
             const tDiv = document.getElementById('news-feed');
             tDiv.innerHTML = "";
             s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
@@ -654,7 +654,7 @@ const frontendCode = `
             document.getElementById('d-loss').innerText = d.loss_rate.toFixed(1) + "%";
             document.getElementById('d-prov').innerText = d.provisions.toFixed(1) + "%";
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
-            document.getElementById('d-rec').innerText = Math.round(d.receivables);
+            document.getElementById('d-rec').innerText = "₹" + Math.round(d.receivables) + " Cr";
         }
         function updAdmin(s) {
             document.getElementById('adm-rd').innerText = s.round;
@@ -678,6 +678,7 @@ const frontendCode = `
                         <div>\${decStatus}</div>
                     </div>
                     <div style="font-size:0.9em; margin-top:5px;">ROE: \${team.roe.toFixed(1)}% | Cap: \${team.capital_ratio.toFixed(1)}%</div>
+                    <div style="font-size:0.9em;">Receivables: ₹\${Math.round(team.receivables)} Cr</div>
                     \${decDetail}
                 </div>\`;
             });
