@@ -1,8 +1,9 @@
 /**
- * CREDIT CARD RISK SIMULATION v8.0 - TIGHT FEEDBACK & SENSITIVITY
- * - Logic: Loss Lag reduced to 1 Quarter (Round N feels Round N-1).
- * - UI: "Impact Analysis" expandable panels for every slider.
- * - UI: Explicit sensitivity data (Loss/Return/Cap/Prov) displayed.
+ * CREDIT CARD RISK SIMULATION v9.0 - ASTRAL MISSION LOG
+ * - Feature: Full-screen Deep Space Charting Interface
+ * - Feature: Dual-Axis Graph (ROE vs RAROC)
+ * - Visual: Pulsing "Satellite" Data Points
+ * - Logic: Cumulative RAROC tracked per round for graphing
  * - Port: 3000
  */
 
@@ -81,12 +82,13 @@ const INITIAL_TEAM_STATE = {
     roe: 12.0,
     loss_rate: 2.5,
     provisions: 2.5, 
-    risk_history: [2.5], // Initialized with 1 historical point
+    risk_history: [2.5], 
     decisions: {}, 
     history_log: [],
     cumulative_profit: 0,
     cumulative_capital_usage: 0,
     roe_history: [],
+    raroc_history: [], // Added for graph
     final_score: 0,
     raroc: 0
 };
@@ -161,7 +163,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (1-QUARTER LAG) ---
+// --- 3. MATH ENGINE ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -191,7 +193,6 @@ function runSimulationEngine() {
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
 
-        // ACQUISITION COST
         let acqCost = 0;
         if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; 
         if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   
@@ -201,18 +202,13 @@ function runSimulationEngine() {
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // --- LOSSES (1-QUARTER LAG) ---
-        // We look at the Risk Index from 2 steps ago in the array 
-        // (Step 0=History, Step 1=Last Round, Step 2=Current Round)
-        // Actually, for 1-Quarter Lag, we want the risk from the PREVIOUS round.
+        // LOSSES
         const lagIndex = team.risk_history.length - 2; 
-        // Ensure we don't go out of bounds
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
-        
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // PROVISIONS (Immediate)
+        // PROVISIONS
         team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.8 : 1.1) * 0.8; 
         
         const revenue = team.receivables * 0.14; 
@@ -231,12 +227,18 @@ function runSimulationEngine() {
         team.cumulative_capital_usage += economicCapital;
         team.roe_history.push(team.roe);
 
+        // Calculate Round RAROC (Cumulative)
+        const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
+        team.raroc_history.push(currentRaroc);
+
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
+            dec_summ: "V:"+dec.vol+" L:"+dec.line.substring(0,4)+" BT:"+dec.bt,
+            met_summ: "ROE:"+team.roe.toFixed(1)+"% L:"+team.loss_rate.toFixed(1)+"%",
             decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli,
             impact: "ROE: "+team.roe.toFixed(1)+"% | Loss: "+team.loss_rate.toFixed(1)+"%"
         });
@@ -255,7 +257,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v8.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v9.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -263,8 +265,9 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v8.0</title>
+    <title>CRO Cockpit v9.0</title>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root { --bg: #0b0f19; --glass: rgba(16, 24, 40, 0.95); --blue: #00f3ff; --green: #00ff9d; --red: #ff0055; --amber: #ffaa00; }
         body { background: #000; color: #e0e6ed; font-family: 'Segoe UI', monospace; margin: 0; height: 100vh; overflow: hidden; display:flex; flex-direction:column; }
@@ -279,12 +282,10 @@ const frontendCode = `
         .screen.active { display:flex; }
         .glass { background: var(--glass); border: 1px solid #333; box-shadow: 0 0 20px rgba(0,0,0,0.8); border-radius: 4px; padding: 15px; display:flex; flex-direction:column; }
         
-        /* HUD */
+        /* HUD & Controls */
         #hud { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
         .metric { text-align: center; border-top: 2px solid var(--blue); padding: 10px; } 
         .val { font-size: 1.8em; font-weight: bold; letter-spacing: 1px; }
-
-        /* CONTROLS */
         .control-scroll-area { flex:1; overflow-y:auto; padding-right:5px; margin-bottom:10px; border-bottom:1px solid #333; }
         .control-row { margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px; position:relative; }
         .control-row label { display: block; color: var(--blue); margin-bottom: 5px; font-weight: bold; text-transform:uppercase; font-size:0.8em; }
@@ -304,11 +305,43 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* LAYOUT HELPERS */
-        #side-panel { position: absolute; top: 0; right: 0; width: 0; height: 100%; background: #080808; border-left: 1px solid var(--blue); transition: 0.3s; overflow-y: auto; z-index: 100; display:flex; flex-direction:column; }
-        #side-panel.open { width: 350px; padding: 20px; box-shadow: -10px 0 30px rgba(0,0,0,0.9); }
-        .log-entry { border-bottom: 1px solid #333; padding: 10px 0; font-size: 0.85em; }
+        /* MISSION LOG (ASTRAL GRAPH) */
+        #mission-control {
+            position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
+            background: radial-gradient(circle at center, #0B1021 0%, #000000 100%);
+            display:none; flex-direction:column; padding:20px; box-sizing:border-box;
+        }
+        #mission-control.open { display:flex; }
         
+        /* SATELLITE POINTS (Overlay on Chart) */
+        .chart-container { position:relative; flex:1; width:100%; margin-top:20px; }
+        .satellite-point {
+            position: absolute; width: 12px; height: 12px; border-radius: 50%;
+            background: white; transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px var(--blue), 0 0 20px var(--blue);
+            animation: pulse 3s infinite ease-in-out;
+            cursor: pointer; z-index:10;
+        }
+        .sat-label-top {
+            position:absolute; bottom:15px; left:50%; transform:translateX(-50%);
+            white-space:nowrap; font-size:0.75em; color:var(--blue); 
+            background:rgba(0,0,0,0.7); padding:2px 5px; border-radius:3px;
+            border:1px solid #333; pointer-events:none;
+        }
+        .sat-label-btm {
+            position:absolute; top:15px; left:50%; transform:translateX(-50%);
+            white-space:nowrap; font-size:0.75em; color:var(--green); 
+            background:rgba(0,0,0,0.7); padding:2px 5px; border-radius:3px;
+            border:1px solid #333; pointer-events:none;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 0 20px var(--blue), 0 0 40px var(--blue); }
+            100% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+        }
+
+        /* LAYOUT HELPERS */
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
@@ -332,7 +365,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v8.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v9.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -461,21 +494,26 @@ const frontendCode = `
                 <div class="glass" style="width: 30%; display:flex; flex-direction:column;">
                     <h4 style="color:var(--red); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CEO PRIORITY</h4>
                     <div id="ceo-msg" style="font-style:italic; margin-bottom:20px; font-size:1.1em; color:#ddd; flex:1; overflow-y:auto;">"System Initializing..."</div>
-                    <button onclick="toggleHistory()" style="background:none; border:1px solid var(--amber); color:var(--amber); padding:10px; margin-bottom:20px; cursor:pointer;">> VIEW MISSION LOG</button>
+                    <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); margin-bottom:20px; font-size:1em;">> VIEW MISSION LOG</button>
                     <div style="margin-top:auto;">
                         <div style="font-size:0.8em; color:#666;">CURRENT SCENARIO</div>
                         <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">-</div>
                     </div>
                 </div>
-                
-                <div id="side-panel">
-                    <button onclick="toggleHistory()" style="background:none; border:none; color:white; cursor:pointer; text-align:left; font-size:1.2em; margin-bottom:20px;">X CLOSE LOG</button>
-                    <h3 style="color:var(--blue); border-bottom:1px solid #333; padding-bottom:10px;">DECISION HISTORY</h3>
-                    <div id="hist-list"></div>
-                </div>
             </div>
         </div>
     </div>
+    
+    <div id="mission-control">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px;">Strategic Trajectory</h2>
+            <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
+        </div>
+        <div class="chart-container" id="chart-wrapper">
+            <canvas id="missionChart"></canvas>
+            </div>
+    </div>
+
     <div id="endgame-screen">
         <div class="score-card">
             <h1 style="color:var(--amber); font-size:3em; margin:0;">SIMULATION COMPLETE</h1>
@@ -484,10 +522,14 @@ const frontendCode = `
             <button onclick="location.reload()" style="margin-top:30px; padding:10px; background:#333; color:white; border:none; cursor:pointer;">RESET SYSTEM</button>
         </div>
     </div>
+
     <script>
         const socket = io();
         let myTeam = "";
+        let teamDataRef = null;
         let decisions = { line: 'Balanced', freeze: 'None' };
+        let missionChart = null;
+
         function sEmit(ev, data) { socket.emit(ev, data); }
         function login(role) {
             if(role==='team') sEmit('login', {role, teamName: document.getElementById('tName').value.toUpperCase()});
@@ -500,14 +542,9 @@ const frontendCode = `
             if(grp === 'grp-frz') decisions.freeze = val;
             updContext();
         }
-        function toggleSens(id) {
-            document.getElementById(id).classList.toggle('open');
-        }
+        function toggleSens(id) { document.getElementById(id).classList.toggle('open'); }
         function updContext() {
             const v = document.getElementById('i-vol').value;
-            const c = document.getElementById('i-cli').value;
-            const b = document.getElementById('i-bt').value;
-            const cl = document.getElementById('i-coll').value;
             document.getElementById('ctx-vol').innerText = v==1?"Low Risk": (v==5?"High Risk":"Balanced");
         }
         function submit() {
@@ -522,9 +559,84 @@ const frontendCode = `
             sEmit('submit_decision', data);
             document.getElementById('lock-overlay').classList.remove('hidden');
         }
-        function toggleHistory() {
-            document.getElementById('side-panel').classList.toggle('open');
+
+        // --- GRAPHING LOGIC ---
+        function showMissionLog() {
+            document.getElementById('mission-control').classList.add('open');
+            renderChart();
         }
+        function closeMissionLog() {
+            document.getElementById('mission-control').classList.remove('open');
+        }
+
+        function renderChart() {
+            if(!teamDataRef) return;
+            // Process Data: Reverse chronological log to linear arrays
+            const sortedLog = [...teamDataRef.history_log].reverse();
+            const roeData = teamDataRef.roe_history;
+            const rarocData = teamDataRef.raroc_history;
+            const rounds = sortedLog.map(l => "R" + l.round);
+
+            const ctx = document.getElementById('missionChart').getContext('2d');
+            if(missionChart) missionChart.destroy();
+
+            missionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rounds,
+                    datasets: [
+                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: 'rgba(0,255,157,0.1)', yAxisID: 'y', tension: 0.4 },
+                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: 'rgba(0,243,255,0.1)', yAxisID: 'y1', tension: 0.4 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#00ff9d' } },
+                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#00f3ff' } },
+                        x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
+                    },
+                    animation: {
+                        onComplete: () => { updateSatellites(sortedLog); }
+                    }
+                }
+            });
+        }
+
+        function updateSatellites(logData) {
+            // Remove old sats
+            document.querySelectorAll('.satellite-point, .sat-label-top, .sat-label-btm').forEach(e => e.remove());
+            const wrapper = document.getElementById('chart-wrapper');
+            const meta = missionChart.getDatasetMeta(0); // Use ROE line for position reference
+            
+            meta.data.forEach((point, index) => {
+                // Create Satellite
+                const sat = document.createElement('div');
+                sat.className = 'satellite-point';
+                sat.style.left = point.x + 'px';
+                sat.style.top = point.y + 'px';
+                wrapper.appendChild(sat);
+
+                // Create Top Label (Decisions)
+                const topLab = document.createElement('div');
+                topLab.className = 'sat-label-top';
+                topLab.innerText = logData[index].dec_summ;
+                topLab.style.left = point.x + 'px';
+                topLab.style.bottom = (wrapper.clientHeight - point.y + 15) + 'px';
+                wrapper.appendChild(topLab);
+
+                // Create Bottom Label (Outcomes)
+                const btmLab = document.createElement('div');
+                btmLab.className = 'sat-label-btm';
+                btmLab.innerText = logData[index].met_summ;
+                btmLab.style.left = point.x + 'px';
+                btmLab.style.top = (point.y + 15) + 'px';
+                wrapper.appendChild(btmLab);
+            });
+        }
+
         socket.on('auth_success', (res) => {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             if(res.role === 'admin') {
@@ -532,6 +644,7 @@ const frontendCode = `
                 updAdmin(res.state);
             } else {
                 myTeam = res.teamName;
+                teamDataRef = res.teamData;
                 document.getElementById('team-ui').classList.add('active');
                 updTeam(res.teamData, res.state);
             }
@@ -571,7 +684,10 @@ const frontendCode = `
             if(adminDiv.classList.contains('active')) updAdmin(s);
         });
         socket.on('team_data_update', (msg) => {
-            if(msg.name === myTeam) updTeam(msg.data, null);
+            if(msg.name === myTeam) {
+                teamDataRef = msg.data;
+                updTeam(msg.data, null);
+            }
         });
         function updTeam(d, s) {
             document.getElementById('d-roe').innerText = d.roe.toFixed(1) + "%";
@@ -579,12 +695,6 @@ const frontendCode = `
             document.getElementById('d-prov').innerText = d.provisions.toFixed(1) + "%";
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
             document.getElementById('d-rec').innerText = Math.round(d.receivables);
-            
-            const log = document.getElementById('hist-list');
-            log.innerHTML = "";
-            d.history_log.forEach(h => {
-                log.innerHTML += '<div class="log-entry"><div class="log-round">Round '+h.round+' ('+h.scenario+')</div><div class="log-detail">'+h.decision+'</div><div style="color:var(--green)">'+h.impact+'</div></div>';
-            });
         }
         function updAdmin(s) {
             document.getElementById('adm-rd').innerText = s.round;
