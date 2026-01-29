@@ -1,11 +1,9 @@
 /**
- * CREDIT CARD RISK SIMULATION v14.0 - DEEP SPACE EDITION
- * - Visual: Saturn Front & Center, Milky Way Background.
- * - Visual: Graph Zones Removed (True Fog of War).
- * - UI: Receivables in ₹ Crores (Starting at 1000 Cr).
- * - UI: Explicit Decision Labels (Acq/Limit/Upsell).
- * - Content: Scenario Name Hidden from Players.
- * - Logic: 1-Quarter Lag, Acquisition Cost, IFRS 9 Provisions.
+ * CREDIT CARD RISK SIMULATION v15.0 - GALACTIC DASHBOARD
+ * - Visual: Mixed Chart (Lines for %, Ghost Bars for ₹ Cr).
+ * - Visual: Fixed Milky Way Visibility.
+ * - Logic: Arrows indicate Slider Movement (Left/Right).
+ * - Data: Revenue & Receivables tracking added to history.
  * - Port: 3000
  */
 
@@ -37,7 +35,7 @@ const SCENARIOS = {
 };
 
 const INITIAL_TEAM_STATE = {
-    receivables: 1000, // Starts at 1000 Cr
+    receivables: 1000, 
     capital_ratio: 14.0, 
     roe: 12.0,
     loss_rate: 2.5,
@@ -49,6 +47,8 @@ const INITIAL_TEAM_STATE = {
     cumulative_capital_usage: 0,
     roe_history: [],
     raroc_history: [],
+    rev_history: [], // New for Bar Chart
+    bal_history: [], // New for Bar Chart
     final_score: 0,
     raroc: 0
 };
@@ -98,9 +98,7 @@ io.on('connection', (socket) => {
             else gameState.scenario = 'C';
 
             // Generate News
-            const NEWS_DB = [ 
-                "BBG: Trading volume spikes", "CNBC: Analyst downgrade on sector", "WSJ: Consumer credit data delayed" 
-            ]; 
+            const NEWS_DB = [ "BBG: Trading volume spikes", "CNBC: Analyst downgrade on sector", "WSJ: Consumer credit data delayed" ]; 
             gameState.news_feed = NEWS_DB; 
             
             io.emit('state_update', gameState);
@@ -193,37 +191,45 @@ function runSimulationEngine() {
         team.cumulative_profit += profit;
         const economicCapital = (team.receivables * 0.14) * (histRisk/2); 
         team.cumulative_capital_usage += economicCapital;
+        
+        // PUSH HISTORY FOR GRAPH
         team.roe_history.push(team.roe);
-
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
+        team.rev_history.push(revenue);
+        team.bal_history.push(team.receivables);
 
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
-        // ARROW LOGIC
-        let volArrow = "↔"; let lineArrow = "↔";
+        // ARROW LOGIC (Cleaned Up)
+        const getArrow = (curr, prev) => (Number(curr) > Number(prev)) ? "↑" : ((Number(curr) < Number(prev)) ? "↓" : "↔");
+        const mapLine = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
+        const mapFrz = (f) => f==='Reactive'?3:(f==='Selective'?2:1);
+
+        let vArr="↔", lArr="↔", cArr="↔", bArr="↔", fArr="↔", clArr="↔";
+        
         const prevDec = team.decisions[gameState.round - 1];
         if(prevDec) {
-            if(Number(dec.vol) > Number(prevDec.vol)) volArrow = "↑";
-            if(Number(dec.vol) < Number(prevDec.vol)) volArrow = "↓";
-            const riskScore = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
-            if(riskScore(dec.line) > riskScore(prevDec.line)) lineArrow = "↑";
-            if(riskScore(dec.line) < riskScore(prevDec.line)) lineArrow = "↓";
+            vArr = getArrow(dec.vol, prevDec.vol);
+            lArr = getArrow(mapLine(dec.line), mapLine(prevDec.line));
+            cArr = getArrow(dec.cli, prevDec.cli);
+            bArr = getArrow(dec.bt, prevDec.bt);
+            fArr = getArrow(mapFrz(dec.freeze), mapFrz(prevDec.freeze));
+            clArr = getArrow(dec.coll, prevDec.coll);
         }
 
-        // CLEARER LABELS FOR GRAPH
-        // Translating technical terms to readable labels
-        let lineShort = dec.line === 'Conservative' ? 'Cons' : (dec.line === 'Aggressive' ? 'Aggr' : 'Bal');
+        // GENERATE CLEAN LABEL (Only show changes/direction)
+        // We pick the 2 most significant changes to display on the graph to avoid clutter
+        let tag1 = `${vArr} Vol`;
+        let tag2 = `${lArr} Line`;
         
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            // IMPROVED LABELS
-            dec_summ: `${volArrow} Acq | ${lineArrow} Limit (${lineShort})`,
-            met_summ: `Loss: ${team.loss_rate.toFixed(1)}% | Cap: ${team.capital_ratio.toFixed(1)}%`,
-            
-            decision: `Vol:${dec.vol} | Line:${dec.line}`,
+            dec_summ: `${tag1} | ${tag2}`,
+            met_summ: `Loss:${team.loss_rate.toFixed(1)}% | Cap:${team.capital_ratio.toFixed(1)}%`,
+            decision: `Vol:${dec.vol}`,
             impact: `ROE: ${team.roe.toFixed(1)}%`
         });
     });
@@ -241,7 +247,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v14.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v15.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -249,7 +255,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v14.0</title>
+    <title>CRO Cockpit v15.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -282,25 +288,21 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG (DEEP SPACE) */
+        /* MISSION LOG (GALACTIC DASHBOARD) */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: radial-gradient(circle at center, #0B1021 0%, #000 100%);
+            background: rgba(0,0,0,0.85); /* Semi-transparent so background shows */
             display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
         }
         #mission-control.open { display:flex; }
         
-        .celestial-body { position: absolute; opacity: 0.6; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
-        
-        /* THE MILKY WAY */
-        #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.4; z-index:0; }
-        
-        /* SATURN - FRONT AND CENTER */
+        .celestial-body { position: absolute; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
+        #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.3; z-index:0; position:absolute; }
         #saturn { 
             bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); 
             width: 700px; height: 500px; 
             background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; 
-            opacity: 0.3; z-index: 0;
+            opacity: 0.3; z-index: 0; position:absolute;
         }
 
         .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
@@ -342,7 +344,6 @@ const frontendCode = `
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
         .score-card { width: 60%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; max-height:80vh; overflow-y:auto; }
-        
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
@@ -360,7 +361,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v14.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v15.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -409,7 +410,7 @@ const frontendCode = `
                             <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>2. INITIAL CREDIT LIMIT</label>
+                            <label>2. INITIAL LINE ASSIGNMENT</label>
                             <div class="btn-group" id="grp-line">
                                 <div class="btn-opt" onclick="selBtn('grp-line', 'Conservative')">Conservative</div>
                                 <div class="btn-opt selected" onclick="selBtn('grp-line', 'Balanced')">Balanced</div>
@@ -419,7 +420,7 @@ const frontendCode = `
                             <div id="sens-line" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>3. UPSELL (CLI) STRATEGY</label>
+                            <label>3. UPSELL AGGRESSION</label>
                             <input type="range" id="i-cli" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
                             <div id="sens-cli" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div></div>
@@ -463,8 +464,8 @@ const frontendCode = `
     </div>
     
     <div id="mission-control">
-        <div id="milky-way" class="celestial-body"></div>
-        <div id="saturn" class="celestial-body"></div>
+        <div id="milky-way"></div>
+        <div id="saturn"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; z-index:10; width:100%;">
             <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px; text-shadow:0 0 10px var(--blue);">Strategic Trajectory</h2>
             <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
@@ -536,19 +537,23 @@ const frontendCode = `
             const sortedLog = [...teamDataRef.history_log].reverse();
             const roeData = teamDataRef.roe_history;
             const rarocData = teamDataRef.raroc_history;
+            const revData = teamDataRef.rev_history;
+            const balData = teamDataRef.bal_history;
             const rounds = sortedLog.map(l => "R" + l.round);
 
             const ctx = document.getElementById('missionChart').getContext('2d');
             if(missionChart) missionChart.destroy();
 
-            // NO BACKGROUND STRIPES - FOG OF WAR
+            // MIXED CHART: LINES FOR %, BARS FOR ₹
             missionChart = new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
                     labels: rounds,
                     datasets: [
-                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: 'rgba(0,255,157,0.1)', tension: 0.4 },
-                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: 'rgba(0,243,255,0.1)', tension: 0.4 }
+                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: '#00ff9d', type: 'line', yAxisID: 'y', tension: 0.4 },
+                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: '#00f3ff', type: 'line', yAxisID: 'y', tension: 0.4 },
+                        { label: 'Receivables (Cr)', data: balData, backgroundColor: 'rgba(255,255,255,0.1)', yAxisID: 'y1' },
+                        { label: 'Revenue (Cr)', data: revData, backgroundColor: 'rgba(255,215,0,0.2)', yAxisID: 'y1' }
                     ]
                 },
                 options: {
@@ -556,7 +561,8 @@ const frontendCode = `
                     maintainAspectRatio: false,
                     layout: { padding: { left: 80, right: 80, top: 20, bottom: 20 } },
                     scales: {
-                        y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#fff' } },
+                        y: { type: 'linear', position: 'left', grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#fff' }, title:{display:true, text:'PERCENT %', color:'#aaa'} },
+                        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#ccc' }, title:{display:true, text:'VALUE (Cr)', color:'#aaa'} },
                         x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
                     },
                     animation: { onComplete: () => { updateSatellites(sortedLog); } }
@@ -567,19 +573,16 @@ const frontendCode = `
         function updateSatellites(logData) {
             document.querySelectorAll('.satellite, .data-label, .guide-line').forEach(e => e.remove());
             const wrapper = document.getElementById('chart-wrapper');
+            // We track satellites on the ROE line (Dataset 0)
             const metaROE = missionChart.getDatasetMeta(0);
-            const metaRAROC = missionChart.getDatasetMeta(1);
             
             metaROE.data.forEach((point, i) => {
                 createSat(wrapper, point.x, point.y, 'sat-green');
                 const stagger = (i % 2 === 0) ? 40 : 70; 
                 createLabel(wrapper, point.x, point.y - stagger, logData[i].dec_summ, 'lbl-decision');
                 createLine(wrapper, point.x, point.y, point.x, point.y - stagger + 15);
-            });
-
-            metaRAROC.data.forEach((point, i) => {
-                createSat(wrapper, point.x, point.y, 'sat-blue');
-                const stagger = (i % 2 === 0) ? 40 : 70;
+                
+                // Metrics below
                 createLabel(wrapper, point.x, point.y + stagger, logData[i].met_summ, 'lbl-metric');
                 createLine(wrapper, point.x, point.y, point.x, point.y + stagger - 5);
             });
@@ -633,6 +636,7 @@ const frontendCode = `
                 return;
             }
             document.getElementById('rd-ind').innerText = "ROUND " + s.round;
+            document.getElementById('scen-nm').innerText = "MARKET DATA: ENCRYPTED";
             const tDiv = document.getElementById('news-feed');
             tDiv.innerHTML = "";
             s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
