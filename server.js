@@ -1,9 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v18.0 - HALL OF FAME
- * - Feature: 5 Distinct CRO Archetypes based on playstyle.
- * - Feature: Contextual Endgame Commentary ("What went well" vs "Missed the bus").
- * - Math: Calibrated Gold Standard Engine (v17.2 logic).
- * - Visual: Deep Space / Blackout Theme.
+ * CREDIT CARD RISK SIMULATION v18.2 - PREDICTIVE INTELLIGENCE
+ * - Content: CRO Panel now provides 9 distinct, forward-looking risk signals.
+ * - Logic: Solvency Logic (Recapitalization) retained.
+ * - Visual: Deep Space Theme retained.
  * - Port: 3000
  */
 
@@ -16,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = "admin"; 
 
 // --- 1. DATABASES ---
+
 const CEO_SCRIPTS = {
     1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
     2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
@@ -34,16 +34,23 @@ const NEWS_DB = {
     'C': [ "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%", "BBG: Liquidity freeze in inter-bank markets", "WSJ: Unemployment spikes to 7.5%" ]
 };
 
-const CRO_INTEL = {
-    'A': { vital: "PRIME++", cof: "4.5% (Low)", liq: "Abundant" },
-    'B': { vital: "DRIFTING", cof: "6.0% (Rising)", liq: "Tightening" },
-    'C': { vital: "TOXIC", cof: "8.5% (Spike)", liq: "CRITICAL" }
+// --- NEW: ROUND-SPECIFIC FORWARD LOOKING INTEL ---
+const CRO_INTEL_DB = {
+    1: { vital: "Vintage Analysis: Clean.", cof: "Swap Curve: Flat/Stable.", liq: "Excess Capital Deployment Rec." },
+    2: { vital: "FICO Bands: 700+ strong.", cof: "Spreads: Tight (Cheap).", liq: "Buffer: Healthy." },
+    3: { vital: "Early Warning: 30DPD uptick in sub-prime.", cof: "Treasury: 2Y Yields creeping +10bps.", liq: "Inter-bank: Slight tightening." },
+    4: { vital: "Forecast: Payment shock risk if rates rise.", cof: "Market Pricing: +50bps hike likely.", liq: "Stress Test: Margins thinning." },
+    5: { vital: "Roll-Rates: 30->60 bucket accelerating.", cof: "Margin Squeeze: Liability costs rising.", liq: "Rec: Preserve Capital." },
+    6: { vital: "Vintage Decay: Recent books performing poorly.", cof: "Wholesale Funding: Expensive.", liq: "ALM Mismatch: High Risk." },
+    7: { vital: "Shock Model: Predicting 8% NPLs.", cof: "Credit Freeze: New debt prohibitive.", liq: "CRITICAL: Protect Tier 1 Ratio." },
+    8: { vital: "Write-offs: Accelerating.", cof: "External Markets: Closed.", liq: "Insolvency Risk: High." },
+    9: { vital: "Stabilization: Toxic debt clearing?", cof: "Fed Intervention: Rates flooring.", liq: "Position: Fragile but surviving." }
 };
 
 const SCENARIOS = {
-    'A': { id: 'A', severity: 0.8, tail_weight: 0.3 },
-    'B': { id: 'B', severity: 1.2, tail_weight: 0.8 }, 
-    'C': { id: 'C', severity: 2.2, tail_weight: 1.5 } 
+    'A': { id: 'A', name: 'Expansion', severity: 0.8, tail_weight: 0.3 },
+    'B': { id: 'B', name: 'Late Cycle', severity: 1.2, tail_weight: 0.8 }, 
+    'C': { id: 'C', name: 'Shock', severity: 2.2, tail_weight: 1.5 } 
 };
 
 const INITIAL_TEAM_STATE = {
@@ -63,8 +70,8 @@ const INITIAL_TEAM_STATE = {
     bal_history: [],
     final_score: 0,
     raroc: 0,
-    archetype: {}, // New Field
-    commentary: {} // New Field
+    archetype: {}, 
+    commentary: {} 
 };
 
 // --- 2. STATE ---
@@ -101,7 +108,7 @@ io.on('connection', (socket) => {
             if (gameState.status === 'ENDGAME') return; 
             if (gameState.round >= 9) {
                  gameState.status = 'ENDGAME';
-                 calculateFinalScores(); // Triggers the archetype logic
+                 calculateFinalScores();
                  io.emit('state_update', gameState);
                  return;
             }
@@ -113,7 +120,9 @@ io.on('connection', (socket) => {
             else gameState.scenario = 'C';
 
             gameState.news_feed = NEWS_DB[gameState.scenario].sort(() => 0.5 - Math.random()).slice(0, 3);
-            gameState.cro_data = CRO_INTEL[gameState.scenario];
+            
+            // PULL ROUND-SPECIFIC CRO DATA
+            gameState.cro_data = CRO_INTEL_DB[gameState.round] || { vital: "No Data", cof: "No Data", liq: "No Data" };
             
             io.emit('state_update', gameState);
         }
@@ -144,7 +153,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (SOLVENCY LOGIC) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -196,11 +205,25 @@ function runSimulationEngine() {
         const provCost = team.receivables * (team.provisions/100);
 
         const profit = grossRevenue - intExp - opExp - creditCost - provCost;
-        const equity = team.receivables * (team.capital_ratio / 100);
-        team.roe = (profit / equity) * 100;
+        
+        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
+        else team.capital_ratio += 0.2; 
+
+        // FORCED RECAPITALIZATION LOGIC
+        let finalEquity = team.receivables * (team.capital_ratio / 100);
+        
+        if (team.capital_ratio < 10.0) {
+            const requiredEquity = team.receivables * 0.10;
+            finalEquity = requiredEquity;
+            team.capital_ratio = 10.0; 
+        }
+
+        team.roe = (profit / finalEquity) * 100;
         
         team.cumulative_profit += profit;
-        const economicCapital = equity * ecFactor * (histRisk/2.5); 
+        const riskPenalty = team.capital_ratio === 10.0 ? 1.5 : 1.0;
+        const economicCapital = finalEquity * ecFactor * riskPenalty; 
+        
         team.cumulative_capital_usage += economicCapital;
         
         team.roe_history.push(team.roe);
@@ -209,15 +232,11 @@ function runSimulationEngine() {
         team.rev_history.push(grossRevenue);
         team.bal_history.push(team.receivables);
 
-        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
-        else team.capital_ratio += 0.2; 
-
-        // Dynamic Labels
+        // Logging
         let labelChanges = [];
         const prevDec = team.decisions[gameState.round - 1];
-        if(!prevDec) {
-            labelChanges.push("Initial Deployment");
-        } else {
+        if(!prevDec) labelChanges.push("Initial Deployment");
+        else {
             const check = (name, curr, prev, type) => {
                 let c = Number(curr); let p = Number(prev);
                 if(type === 'line') { const s = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1); c=s(curr); p=s(prev); }
@@ -250,28 +269,27 @@ function calculateFinalScores() {
         
         let score = (raroc * 0.6) + (avgRoe * 0.4);
         
-        // --- ARCHETYPE ASSIGNMENT ---
         let title = "THE PASSENGER";
         let color = "#aaa";
         let good = "You survived the cycle.";
         let bad = "But you merely existed, you didn't lead.";
 
-        if(team.capital_ratio < 8.0) {
-            title = "THE INSOLVENCY ARTIST"; color = "#ff0055"; score = 0;
-            good = "You provided a great case study on failure.";
-            bad = "You bet the farm and lost the tractor. Regulators seized the keys.";
-        } else if (score > 28) {
+        if (score > 28) {
             title = "THE GRANDMASTER"; color = "#00ff9d";
-            good = "Surgical precision. Perfect timing on the throttle and the brakes.";
+            good = "Surgical precision. Perfect timing.";
             bad = "Honestly? Nothing. You made the rest of us look bad.";
-        } else if (avgRoe > 22 && raroc < 20) {
+        } else if (avgRoe > 18 && raroc < 15) {
             title = "THE ADRENALINE JUNKIE"; color = "#ffaa00";
-            good = "You delivered massive growth in the boom years.";
-            bad = "Your 'Risk Tax' was huge. You got lucky the crash wasn't deeper.";
-        } else if (avgRoe < 16 && team.capital_ratio > 16) {
+            good = "You generated massive revenue.";
+            bad = "But you kept triggering Capital Calls. Shareholders were diluted.";
+        } else if (avgRoe < 12 && team.capital_ratio > 15) {
             title = "THE VAULT KEEPER"; color = "#00f3ff";
-            good = "Your balance sheet is bulletproof. Regulators love you.";
+            good = "Your balance sheet is bulletproof.";
             bad = "Shareholders fell asleep. You missed the growth bus completely.";
+        } else if (score < 10) {
+            title = "THE INSOLVENCY ARTIST"; color = "#ff0055";
+            good = "You provided a great case study on failure.";
+            bad = "Constant recapitalization destroyed all shareholder value.";
         }
 
         team.final_score = Math.round(score * 10) / 10;
@@ -280,7 +298,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v18.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v18.2 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -288,7 +306,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v18.0</title>
+    <title>CRO Cockpit v18.2</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -377,7 +395,6 @@ const frontendCode = `
         .cro-lbl { color:#aaa; }
         .cro-val { color:var(--blue); font-weight:bold; }
         
-        /* ENDGAME STYLES */
         .rank-card { background:#1a1a1a; margin-bottom:15px; padding:15px; text-align:left; border-left:5px solid #555; }
         .rank-title { font-size:1.4em; font-weight:bold; margin-bottom:5px; text-transform:uppercase; }
         .rank-stats { font-size:0.9em; color:#888; margin-bottom:10px; }
@@ -398,7 +415,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v18.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v18.2</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -670,11 +687,17 @@ const frontendCode = `
                 const sorted = Object.keys(s.teams).sort((a,b) => s.teams[b].final_score - s.teams[a].final_score);
                 sorted.forEach((t, i) => {
                     const tm = s.teams[t];
-                    // RENDER DETAILED CARD
                     list.innerHTML += \`
                     <div class="rank-card" style="border-left-color: \${tm.archetype.color}">
                         <div class="rank-title" style="color:\${tm.archetype.color}">#\${i+1} \${t} : \${tm.archetype.title}</div>
-                        <div class="rank-stats">SCORE: \${tm.final_score} | RAROC: \${tm.raroc.toFixed(1)}% | ROE: \${(tm.roe_history.reduce((a,b)=>a+b,0)/tm.roe_history.length).toFixed(1)}%</div>
+                        <div class="rank-stats">
+                            SCORE: \${tm.final_score} | 
+                            RAROC: \${tm.raroc.toFixed(1)}% | 
+                            ROE: \${(tm.roe_history.reduce((a,b)=>a+b,0)/tm.roe_history.length).toFixed(1)}% | 
+                            <span style="color:\${tm.capital_ratio < 10 ? '#ff0055' : '#fff'}">
+                                CAPITAL: \${tm.capital_ratio.toFixed(1)}%
+                            </span>
+                        </div>
                         <div class="feedback-box">
                             <div class="fb-good">✓ \${tm.commentary.good}</div>
                             <div class="fb-bad">⚠ \${tm.commentary.bad}</div>
@@ -743,4 +766,3 @@ const frontendCode = `
     </script>
 </body>
 </html>
-`;
