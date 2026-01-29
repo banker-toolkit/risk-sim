@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v16.0 - BLACKOUT EDITION
- * - Visual Fix: Mission Log is now 100% Opaque (Solid Background).
- * - Visual: No bleed-through from the game screen.
- * - Logic: All v15 features (Ghost Bars, Arrows, Mixed Chart) retained.
+ * CREDIT CARD RISK SIMULATION v17.0 - DYNAMIC RECORDER
+ * - Logic Fix: Mission Log labels now dynamically reflect ALL 6 sliders.
+ * - Logic: Detects exactly what changed (Vol, Line, BT, Coll, etc).
+ * - Visual: "Blackout" Deep Space Theme retained.
  * - Port: 3000
  */
 
@@ -137,6 +137,7 @@ function runSimulationEngine() {
             vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
         };
 
+        // INPUTS
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
         if(dec.line==='Conservative') {lineRisk=0.85; volMult-=0.04;} 
@@ -151,6 +152,7 @@ function runSimulationEngine() {
         let collBenefit = dec.coll * 0.15; 
         let collCost = dec.coll * 0.25;
 
+        // RISK
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
@@ -195,22 +197,48 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
-        const getArrow = (curr, prev) => (Number(curr) > Number(prev)) ? "↑" : ((Number(curr) < Number(prev)) ? "↓" : "↔");
-        const mapLine = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
-        
-        let vArr="↔", lArr="↔";
+        // --- DYNAMIC LABEL GENERATION (The Logic Fix) ---
+        let labelChanges = [];
         const prevDec = team.decisions[gameState.round - 1];
-        if(prevDec) {
-            vArr = getArrow(dec.vol, prevDec.vol);
-            lArr = getArrow(mapLine(dec.line), mapLine(prevDec.line));
+
+        if(!prevDec) {
+            labelChanges.push("Initial Deployment");
+        } else {
+            // Helper for comparison
+            const check = (name, curr, prev, type) => {
+                let c = Number(curr); let p = Number(prev);
+                // Handle String Types
+                if(type === 'line') {
+                    const score = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
+                    c = score(curr); p = score(prev);
+                }
+                if(type === 'freeze') {
+                    const score = (f) => f==='Reactive'?3:(f==='Selective'?2:1);
+                    c = score(curr); p = score(prev);
+                }
+                
+                if(c > p) labelChanges.push(`↑ ${name}`);
+                if(c < p) labelChanges.push(`↓ ${name}`);
+            };
+
+            check("Vol", dec.vol, prevDec.vol, 'num');
+            check("Line", dec.line, prevDec.line, 'line');
+            check("Upsell", dec.cli, prevDec.cli, 'num');
+            check("BT", dec.bt, prevDec.bt, 'num');
+            check("Action", dec.freeze, prevDec.freeze, 'freeze');
+            check("Coll", dec.coll, prevDec.coll, 'num');
         }
 
-        let lineShort = dec.line === 'Conservative' ? 'Cons' : (dec.line === 'Aggressive' ? 'Aggr' : 'Bal');
+        // If no changes, show Steady. If too many, take top 2.
+        let finalLabel = "Steady State";
+        if(labelChanges.length > 0) {
+            finalLabel = labelChanges.slice(0, 2).join(" | "); // Show max 2 changes to prevent clutter
+        }
         
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            dec_summ: `${vArr} Acq | ${lArr} Limit (${lineShort})`,
+            dec_summ: finalLabel,
             met_summ: `Loss:${team.loss_rate.toFixed(1)}% | Cap:${team.capital_ratio.toFixed(1)}%`,
             decision: `Vol:${dec.vol}`,
             impact: `ROE: ${team.roe.toFixed(1)}%`
@@ -230,7 +258,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v16.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v17.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -238,7 +266,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v16.0</title>
+    <title>CRO Cockpit v17.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -344,7 +372,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v16.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v17.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
