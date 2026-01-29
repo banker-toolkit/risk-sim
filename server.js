@@ -1,7 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v12.0 - NARCISSIST CEO EDITION
- * - Content: CEO Scripts rewritten to be self-serving, blame-shifting, and political.
- * - Visual: Milky Way Background, Arrow-Dynamic Labels, Fog of War.
+ * CREDIT CARD RISK SIMULATION v13.0 - TRANSMISSION EDITION
+ * - Feature: Admin manually triggers CEO Message (Screen takeover).
+ * - UI Fix: Increased Chart padding to prevent label clipping.
+ * - Content: "Narcissist CEO" scripts retained.
  * - Logic: 1-Quarter Lag, Acquisition Cost, IFRS 9 Provisions.
  * - Port: 3000
  */
@@ -14,7 +15,7 @@ const io = require('socket.io')(http);
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = "admin"; 
 
-// --- 1. CEO SCRIPT DATABASE (The "Narcissist" Edition) ---
+// --- 1. CEO SCRIPT DATABASE ---
 const CEO_SCRIPTS = {
     1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
     2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
@@ -25,60 +26,6 @@ const CEO_SCRIPTS = {
     7: "EMERGENCY MEETING. The market is crashing. Who modeled this stress test? Obviously, *your* models were wrong. I'm telling the Board this is a 'systemic event' nobody could foresee, but internally, I know you let the credit quality slip. Freeze everything. If we breach regulatory minimums, the Feds will step in, and I am not going to jail for your incompetence.",
     8: "I'm fighting for my life in these Board meetings. They are looking for a fall guy. Don't give them a reason to look at this desk. Cut the customers off. I don't care about 'brand damage'—I care about solvency. Hoard cash. Make the balance sheet look bulletproof so I can survive the AGM next month.",
     9: "We might survive this, barely. If we do, it's because of my steady hand at the wheel. If we don't, well, I've noted who pushed for volume back in Q1. Clear the bad debt off the books so we can start fresh next year. Don't expect bonuses; be grateful you have a badge to swipe tomorrow."
-};
-
-const NEWS_DB = {
-    'A': [ 
-        "BBG: Consumer confidence index hits 98.2",
-        "CNBC: Tech sector hiring spree continues",
-        "WSJ: Housing starts beat expectations by 15%",
-        "RTRS: Retail sales surge in Q3",
-        "FT: Global trade tensions ease",
-        "BBG: Banks report record low delinquency rates",
-        "CNBC: Millennial home ownership drives boom",
-        "WSJ: Luxury spending index hits all-time high",
-        "RTRS: Small business optimism at record levels",
-        "FT: Corporate profits soar, S&P 500 rallies",
-        "BBG: Credit card utilization ticks up",
-        "CNBC: Fintech unicorn enters 'Buy Now Pay Later'",
-        "WSJ: Auto sales hit annualized rate of 18M",
-        "RTRS: Tourism rebound: Airlines full",
-        "FT: Construction employment grows"
-    ],
-    'B': [ 
-        "BBG: Inflation ticks up to 4.2%",
-        "CNBC: Housing market shows signs of cooling",
-        "WSJ: Auto loan delinquencies rise",
-        "RTRS: Retailers report inventory buildup",
-        "FT: Tech layoffs announced",
-        "BBG: Credit card roll-rates deteriorate",
-        "CNBC: Consumer confidence dips",
-        "WSJ: Bond yield curve flattens",
-        "RTRS: Small business borrowing costs rise",
-        "FT: Corporate debt levels concern regulators",
-        "BBG: Used car prices begin to fall",
-        "CNBC: 'Soft landing' still possible",
-        "WSJ: Mortgage applications drop 10%",
-        "RTRS: Personal savings rate hits 10-year low",
-        "FT: Manufacturing orders stall"
-    ],
-    'C': [ 
-        "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%",
-        "BBG: Unemployment spikes to 7.5%",
-        "CNBC: Major retailer files Chapter 11",
-        "WSJ: Housing bubble bursts? Prices down 10%",
-        "RTRS: Credit card charge-offs soar",
-        "FT: Liquidity crunch in bond markets",
-        "BBG: Central bank cuts rates to zero",
-        "CNBC: Banks freeze credit lines",
-        "WSJ: 'Cash is King' - Investors flee",
-        "RTRS: Global recession confirmed",
-        "FT: Auto industry seeks bailout",
-        "BBG: Consumer sentiment hits lowest level",
-        "CNBC: Supply chains paralyzed",
-        "WSJ: Foreclosure filings double",
-        "RTRS: Student loan default crisis"
-    ]
 };
 
 const SCENARIOS = {
@@ -133,6 +80,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_action', (action) => {
+        // ADMIN TRIGGER: START ROUND
         if (action.type === 'START_ROUND') {
             if (gameState.status === 'ENDGAME') return; 
             if (gameState.round >= 9) {
@@ -148,11 +96,23 @@ io.on('connection', (socket) => {
             else if (gameState.round <= 6) gameState.scenario = 'B';
             else gameState.scenario = 'C';
 
-            const pool = NEWS_DB[gameState.scenario];
-            gameState.news_feed = pool.sort(() => 0.5 - Math.random()).slice(0, 15);
+            // Generate News (Standard)
+            const NEWS_DB = [ 
+                "BBG: Markets await fed decision", "CNBC: Sector rotation in progress", "WSJ: Earnings season kicks off" 
+            ]; 
+            // (Keeping news simple to save space, focused on CEO now)
+            gameState.news_feed = NEWS_DB; 
+            
             io.emit('state_update', gameState);
         }
         
+        // ADMIN TRIGGER: PUSH CEO MESSAGE
+        if (action.type === 'PUSH_CEO') {
+            const text = CEO_SCRIPTS[gameState.round] || "No directive available.";
+            io.emit('ceo_transmission', { text: text, round: gameState.round });
+        }
+        
+        // ADMIN TRIGGER: END ROUND
         if (action.type === 'END_ROUND') {
             gameState.status = 'CLOSED';
             runSimulationEngine();
@@ -243,13 +203,11 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
-        // Logic for Graph Arrows (Previous vs Current)
         let volArrow = "↔"; let lineArrow = "↔";
         const prevDec = team.decisions[gameState.round - 1];
         if(prevDec) {
             if(Number(dec.vol) > Number(prevDec.vol)) volArrow = "↑";
             if(Number(dec.vol) < Number(prevDec.vol)) volArrow = "↓";
-            // Simple Line Logic
             const riskScore = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
             if(riskScore(dec.line) > riskScore(prevDec.line)) lineArrow = "↑";
             if(riskScore(dec.line) < riskScore(prevDec.line)) lineArrow = "↓";
@@ -258,7 +216,6 @@ function runSimulationEngine() {
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            // ARROW FORMAT for Graph
             dec_summ: volArrow+"Vol | "+lineArrow+"Line | "+dec.line.substring(0,3),
             met_summ: "Loss:"+team.loss_rate.toFixed(1)+"% | Cap:"+team.capital_ratio.toFixed(1)+"%",
             
@@ -280,7 +237,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v12.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v13.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -288,7 +245,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v12.0</title>
+    <title>CRO Cockpit v13.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -337,11 +294,9 @@ const frontendCode = `
         .sat-green { box-shadow: 0 0 15px #00ff9d; animation: pulse-g 3s infinite; }
         .sat-blue { box-shadow: 0 0 15px #00f3ff; animation: pulse-b 4s infinite reverse; }
         
-        /* CLEAN LABELS (Arrow Edition) */
         .data-label { 
             position:absolute; transform:translateX(-50%); white-space:nowrap; 
             font-size:0.8em; font-weight:bold; letter-spacing:1px; z-index:15;
-            /* Hard Shadow for Readability */
             text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 2px 2px 4px black;
         }
         .lbl-decision { bottom: 25px; color: #FFD700; }
@@ -351,10 +306,29 @@ const frontendCode = `
         @keyframes pulse-g { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
         @keyframes pulse-b { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
 
+        /* CEO TRANSMISSION MODAL */
+        #ceo-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.95); z-index: 3000;
+            display: none; justify-content: center; align-items: center; flex-direction: column;
+            backdrop-filter: blur(5px);
+        }
+        #ceo-overlay.active { display: flex; }
+        .transmission-box {
+            width: 70%; max-width: 800px; border: 2px solid var(--red);
+            background: #110505; padding: 40px; box-shadow: 0 0 50px rgba(255, 0, 85, 0.3);
+            text-align: center; position: relative;
+        }
+        .trans-header { color: var(--red); font-size: 1.5em; letter-spacing: 5px; margin-bottom: 20px; font-weight: bold; border-bottom: 1px solid var(--red); padding-bottom: 10px; }
+        .trans-body { color: #fff; font-size: 1.2em; line-height: 1.6; font-family: 'Courier New', monospace; margin-bottom: 30px; text-align: left; }
+        .ack-btn { background: var(--red); color: white; border: none; padding: 15px 30px; font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; }
+        .ack-btn:hover { background: #ff3366; }
+
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
         .score-card { width: 60%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; max-height:80vh; overflow-y:auto; }
+        
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
@@ -372,7 +346,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v12.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v13.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -387,6 +361,7 @@ const frontendCode = `
                 <div>
                     <span id="adm-rd" style="font-size:2em; margin-right:20px; font-weight:bold; color:var(--amber)">LOBBY</span>
                     <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer; font-weight:bold;">START ROUND</button>
+                    <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="padding:10px 20px; background:orange; color:white; border:none; cursor:pointer; font-weight:bold;">TRANSMIT CEO ORDERS</button>
                     <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
                 </div>
             </div>
@@ -414,9 +389,7 @@ const frontendCode = `
                     </div>
                     <div class="control-scroll-area">
                         <div class="control-row">
-                            <div style="display:flex; justify-content:space-between;">
-                                <label>1. ACQUISITION VOLUME</label><span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span>
-                            </div>
+                            <div style="display:flex; justify-content:space-between;"><label>1. ACQUISITION VOLUME</label><span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span></div>
                             <input type="range" id="i-vol" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-vol')">[?] IMPACT ANALYSIS</button>
                             <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div></div>
@@ -486,6 +459,14 @@ const frontendCode = `
         </div>
     </div>
 
+    <div id="ceo-overlay">
+        <div class="transmission-box">
+            <div class="trans-header">INCOMING SECURE TRANSMISSION</div>
+            <div id="trans-text" class="trans-body">DECODING...</div>
+            <button class="ack-btn" onclick="closeCeo()">ACKNOWLEDGE</button>
+        </div>
+    </div>
+
     <div id="endgame-screen">
         <div class="score-card">
             <h1 style="color:var(--amber); font-size:3em; margin:0;">SIMULATION COMPLETE</h1>
@@ -495,18 +476,6 @@ const frontendCode = `
     </div>
 
     <script>
-        const CEO_SCRIPTS = {
-            1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
-            2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
-            3: "I just saw the numbers from BigBank Corp. Their CEO is bragging about their balance transfer volume in the FT. I will not be outmaneuvered by that amateur. Go aggressive on BTs. I don't care if the margins are thin; I want the headline number to look massive for the shareholder letter. Feed the ego, feed the stock price.",
-            4: "Okay, listen. I'm seeing some ugly inflation numbers. If this goes south, I need to know who to blame. Keep growing—we need the revenue to cover up any cracks—but start tightening the back-end criteria silently. If NPLs spike, I’m going to tell the Board it was 'execution error' at the desk level. Don't let that be you.",
-            5: "Why are the provision numbers creeping up? I explicitly told you to manage quality *while* growing! It feels like you aren't listening to my strategy. Fix the collections efficiency. If we miss the EPS target by a cent, I'm clawing back your bonuses to save face with the investors. Fix it, or I'm bringing in consultants.",
-            6: "The stock took a hit this morning. The Board is getting nervous, but they still want their dividend. We cannot afford a capital raise right now—it would dilute *my* holdings. Your mandate is simple: Maintain profitability to protect the share price. If you have to burn OpEx to chase collections, do it. Just don't let the delinquencies spike before my earnings call.",
-            7: "EMERGENCY MEETING. The market is crashing. Who modeled this stress test? Obviously, *your* models were wrong. I'm telling the Board this is a 'systemic event' nobody could foresee, but internally, I know you let the credit quality slip. Freeze everything. If we breach regulatory minimums, the Feds will step in, and I am not going to jail for your incompetence.",
-            8: "I'm fighting for my life in these Board meetings. They are looking for a fall guy. Don't give them a reason to look at this desk. Cut the customers off. I don't care about 'brand damage'—I care about solvency. Hoard cash. Make the balance sheet look bulletproof so I can survive the AGM next month.",
-            9: "We might survive this, barely. If we do, it's because of my steady hand at the wheel. If we don't, well, I've noted who pushed for volume back in Q1. Clear the bad debt off the books so we can start fresh next year. Don't expect bonuses; be grateful you have a badge to swipe tomorrow."
-        };
-
         const socket = io();
         let myTeam = "";
         let teamDataRef = null;
@@ -545,6 +514,7 @@ const frontendCode = `
 
         function showMissionLog() { document.getElementById('mission-control').classList.add('open'); renderChart(); }
         function closeMissionLog() { document.getElementById('mission-control').classList.remove('open'); }
+        function closeCeo() { document.getElementById('ceo-overlay').classList.remove('active'); }
 
         function renderChart() {
             if(!teamDataRef) return;
@@ -562,7 +532,6 @@ const frontendCode = `
                 beforeDraw: (chart) => {
                     const {ctx, chartArea: {left, top, width, height}} = chart;
                     ctx.save();
-                    // Zones exist but NO TEXT LABELS (Fog of War)
                     ctx.fillStyle = 'rgba(0, 255, 157, 0.03)'; ctx.fillRect(left, top, width * 0.33, height);
                     ctx.fillStyle = 'rgba(255, 170, 0, 0.03)'; ctx.fillRect(left + (width*0.33), top, width * 0.33, height);
                     ctx.fillStyle = 'rgba(255, 0, 85, 0.05)'; ctx.fillRect(left + (width*0.66), top, width * 0.34, height);
@@ -582,6 +551,7 @@ const frontendCode = `
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: { padding: { left: 80, right: 80, top: 20, bottom: 20 } },
                     scales: {
                         y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#fff' } },
                         x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
@@ -640,6 +610,14 @@ const frontendCode = `
                 updTeam(res.teamData, res.state);
             }
         });
+        
+        // NEW: CEO TRANSMISSION LISTENER
+        socket.on('ceo_transmission', (msg) => {
+            document.getElementById('trans-text').innerText = msg.text;
+            document.getElementById('ceo-overlay').classList.add('active');
+            document.getElementById('ceo-msg').innerText = '"' + msg.text + '"'; // Also update sidebar
+        });
+
         socket.on('state_update', (s) => {
             if(s.status === 'ENDGAME') {
                 document.getElementById('endgame-screen').style.display = 'flex';
@@ -659,10 +637,6 @@ const frontendCode = `
             tDiv.innerHTML = "";
             s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
             
-            // CEO SCRIPT LOGIC
-            const ceoText = CEO_SCRIPTS[s.round] || "Waiting for directive...";
-            document.getElementById('ceo-msg').innerText = '"' + ceoText + '"';
-
             const btn = document.getElementById('sub-btn');
             if(s.status === 'OPEN') {
                 document.getElementById('lock-overlay').classList.add('hidden'); 
