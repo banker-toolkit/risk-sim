@@ -1,10 +1,9 @@
 /**
- * CREDIT CARD RISK SIMULATION v17.2 - GOLD STANDARD
- * - Math: Calibrated P&L (Yield 18%, CoF, OpEx, Risk Tax).
- * - Logic: Sniper vs Market Timer scoring balance.
- * - Content: CRO Intelligence Dashboard added.
- * - Content: News Feed strictly synchronized to rounds.
- * - Visual: Deep Space aesthetic, no avatars.
+ * CREDIT CARD RISK SIMULATION v18.0 - HALL OF FAME
+ * - Feature: 5 Distinct CRO Archetypes based on playstyle.
+ * - Feature: Contextual Endgame Commentary ("What went well" vs "Missed the bus").
+ * - Math: Calibrated Gold Standard Engine (v17.2 logic).
+ * - Visual: Deep Space / Blackout Theme.
  * - Port: 3000
  */
 
@@ -17,7 +16,6 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = "admin"; 
 
 // --- 1. DATABASES ---
-
 const CEO_SCRIPTS = {
     1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
     2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
@@ -31,27 +29,9 @@ const CEO_SCRIPTS = {
 };
 
 const NEWS_DB = {
-    'A': [ // BOOM (R1-3)
-        "BBG: Consumer confidence index hits 5-year high",
-        "CNBC: Tech sector hiring spree continues",
-        "WSJ: Retail sales beat expectations by 15%",
-        "RTRS: Banks report record low delinquency rates",
-        "FT: Corporate profits soar, S&P 500 rallies"
-    ],
-    'B': [ // WOBBLE (R4-6)
-        "BBG: Inflation ticks up to 4.2%, Fed watchful",
-        "CNBC: Credit card roll-rates deteriorate slightly",
-        "WSJ: Auto loan delinquencies rise in sub-prime",
-        "RTRS: Retailers report inventory buildup",
-        "FT: Bond yield curve flattens, recession signal?"
-    ],
-    'C': [ // CRASH (R7-9)
-        "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%",
-        "BBG: Liquidity freeze in inter-bank markets",
-        "CNBC: Major retailer files Chapter 11",
-        "WSJ: Unemployment spikes to 7.5% overnight",
-        "RTRS: Central bank emergency rate cut"
-    ]
+    'A': [ "BBG: Consumer confidence hits 5-year high", "CNBC: Tech sector hiring spree continues", "WSJ: Retail sales beat expectations" ],
+    'B': [ "BBG: Inflation ticks up to 4.2%", "CNBC: Credit card roll-rates deteriorate", "FT: Bond yield curve flattens" ],
+    'C': [ "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%", "BBG: Liquidity freeze in inter-bank markets", "WSJ: Unemployment spikes to 7.5%" ]
 };
 
 const CRO_INTEL = {
@@ -61,9 +41,9 @@ const CRO_INTEL = {
 };
 
 const SCENARIOS = {
-    'A': { id: 'A', name: 'Expansion', severity: 0.8, tail_weight: 0.3 },
-    'B': { id: 'B', name: 'Late Cycle', severity: 1.2, tail_weight: 0.8 }, 
-    'C': { id: 'C', name: 'Shock', severity: 2.2, tail_weight: 1.5 } 
+    'A': { id: 'A', severity: 0.8, tail_weight: 0.3 },
+    'B': { id: 'B', severity: 1.2, tail_weight: 0.8 }, 
+    'C': { id: 'C', severity: 2.2, tail_weight: 1.5 } 
 };
 
 const INITIAL_TEAM_STATE = {
@@ -82,7 +62,9 @@ const INITIAL_TEAM_STATE = {
     rev_history: [],
     bal_history: [],
     final_score: 0,
-    raroc: 0
+    raroc: 0,
+    archetype: {}, // New Field
+    commentary: {} // New Field
 };
 
 // --- 2. STATE ---
@@ -119,21 +101,18 @@ io.on('connection', (socket) => {
             if (gameState.status === 'ENDGAME') return; 
             if (gameState.round >= 9) {
                  gameState.status = 'ENDGAME';
-                 calculateFinalScores();
+                 calculateFinalScores(); // Triggers the archetype logic
                  io.emit('state_update', gameState);
                  return;
             }
             gameState.round++;
             gameState.status = 'OPEN';
             
-            // Set Scenario
             if (gameState.round <= 3) gameState.scenario = 'A';
             else if (gameState.round <= 6) gameState.scenario = 'B';
             else gameState.scenario = 'C';
 
-            // Set News & CRO Data
-            const pool = NEWS_DB[gameState.scenario];
-            gameState.news_feed = pool.sort(() => 0.5 - Math.random()).slice(0, 3);
+            gameState.news_feed = NEWS_DB[gameState.scenario].sort(() => 0.5 - Math.random()).slice(0, 3);
             gameState.cro_data = CRO_INTEL[gameState.scenario];
             
             io.emit('state_update', gameState);
@@ -165,23 +144,19 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (CALIBRATED) ---
+// --- 3. MATH ENGINE ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
-        const dec = team.decisions[gameState.round] || {
-            vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
-        };
+        const dec = team.decisions[gameState.round] || { vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3 };
 
-        // 1. INPUTS & MULTIPLIERS
+        // Inputs
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
-        
-        // RISK TAX: Aggressive Lines carry higher latent risk
         let ecFactor = 1.0; 
         if(dec.line==='Conservative') { lineRisk=0.85; volMult-=0.04; ecFactor=0.9; } 
-        if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; } // Penalty for Icarus strategy
+        if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; }
         
         let cliBal = 1 + ((dec.cli - 1) * 0.03); 
         let cliRisk = 1 + ((dec.cli - 1) * 0.07);
@@ -191,9 +166,8 @@ function runSimulationEngine() {
         if(dec.freeze==='Reactive') freezeImpact=0.92;
         let collBenefit = dec.coll * 0.15; 
         
-        // 2. GROWTH & RISK CALCULATION
         const growth = volMult * cliBal * btBal * freezeImpact;
-        const macro = sc.id === 'C' ? 0.92 : 1.04; // Growth slows in crash
+        const macro = sc.id === 'C' ? 0.92 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
@@ -201,95 +175,68 @@ function runSimulationEngine() {
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
 
-        // 3. LOSS CALCULATION (1-Round Lag)
         const lagIndex = team.risk_history.length - 2; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // 4. P&L WATERFALL (The Safety Net)
-        const grossYield = 0.18; // 18% Base Income
-        
-        // Variable Costs based on Scenario
+        // P&L
+        const grossYield = 0.18; 
         let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        
-        // Efficiency Bonus: High Volume = Lower OpEx
         let opExRate = 0.035; 
-        if(dec.vol >= 4) opExRate = 0.025; // Reward for growth
-        if(dec.vol <= 2) opExRate = 0.045; // Penalty for shrinking
+        if(dec.vol >= 4) opExRate = 0.025; 
+        if(dec.vol <= 2) opExRate = 0.045; 
         
         const grossRevenue = team.receivables * grossYield;
         const intExp = team.receivables * cof;
         const opExp = team.receivables * opExRate;
         const creditCost = team.receivables * (team.loss_rate/100);
         
-        // Provisioning (IFRS 9 simplified: High in C, Low in A)
         team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.5 : 0.8);
         const provCost = team.receivables * (team.provisions/100);
 
         const profit = grossRevenue - intExp - opExp - creditCost - provCost;
-        
-        // 5. METRICS (ROE & RAROC)
-        // Equity is dynamic based on Capital Ratio
         const equity = team.receivables * (team.capital_ratio / 100);
         team.roe = (profit / equity) * 100;
         
         team.cumulative_profit += profit;
-        
-        // RAROC uses Economic Capital (Risk Adjusted)
         const economicCapital = equity * ecFactor * (histRisk/2.5); 
         team.cumulative_capital_usage += economicCapital;
         
-        // Push History
         team.roe_history.push(team.roe);
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
         team.rev_history.push(grossRevenue);
         team.bal_history.push(team.receivables);
 
-        // Capital Erosion/Accretion
-        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; // Erosion
-        else team.capital_ratio += 0.2; // Organic generation
+        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
+        else team.capital_ratio += 0.2; 
 
-        // 6. DYNAMIC LOGGING
+        // Dynamic Labels
         let labelChanges = [];
         const prevDec = team.decisions[gameState.round - 1];
-
         if(!prevDec) {
             labelChanges.push("Initial Deployment");
         } else {
             const check = (name, curr, prev, type) => {
                 let c = Number(curr); let p = Number(prev);
-                if(type === 'line') {
-                    const score = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
-                    c = score(curr); p = score(prev);
-                }
-                if(type === 'freeze') {
-                    const score = (f) => f==='Reactive'?3:(f==='Selective'?2:1);
-                    c = score(curr); p = score(prev);
-                }
+                if(type === 'line') { const s = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1); c=s(curr); p=s(prev); }
+                if(type === 'freeze') { const s = (f) => f==='Reactive'?3:(f==='Selective'?2:1); c=s(curr); p=s(prev); }
                 if(c > p) labelChanges.push(`↑ ${name}`);
                 if(c < p) labelChanges.push(`↓ ${name}`);
             };
-
-            check("Vol", dec.vol, prevDec.vol, 'num');
-            check("Line", dec.line, prevDec.line, 'line');
-            check("Upsell", dec.cli, prevDec.cli, 'num');
-            check("BT", dec.bt, prevDec.bt, 'num');
-            check("Action", dec.freeze, prevDec.freeze, 'freeze');
-            check("Coll", dec.coll, prevDec.coll, 'num');
+            check("Vol", dec.vol, prevDec.vol, 'num'); check("Line", dec.line, prevDec.line, 'line');
+            check("Upsell", dec.cli, prevDec.cli, 'num'); check("BT", dec.bt, prevDec.bt, 'num');
+            check("Action", dec.freeze, prevDec.freeze, 'freeze'); check("Coll", dec.coll, prevDec.coll, 'num');
         }
-
         let finalLabel = "Steady State";
         if(labelChanges.length > 0) finalLabel = labelChanges.slice(0, 2).join(" | ");
         
         team.history_log.unshift({
-            round: gameState.round,
-            scenario: gameState.scenario,
+            round: gameState.round, scenario: gameState.scenario,
             dec_summ: finalLabel,
             met_summ: `Loss:${team.loss_rate.toFixed(1)}% | Cap:${team.capital_ratio.toFixed(1)}%`,
-            decision: `Vol:${dec.vol}`,
-            impact: `ROE: ${team.roe.toFixed(1)}%`
+            decision: `Vol:${dec.vol}`, impact: `ROE: ${team.roe.toFixed(1)}%`
         });
     });
 }
@@ -301,15 +248,39 @@ function calculateFinalScores() {
         team.raroc = raroc;
         const avgRoe = team.roe_history.reduce((a,b)=>a+b, 0) / team.roe_history.length;
         
-        // SCORE FORMULA: 60% Efficiency (RAROC) + 40% Growth (ROE)
         let score = (raroc * 0.6) + (avgRoe * 0.4);
         
-        if(team.capital_ratio < 8.0) score -= 50; // Regulatory Breach Penalty
+        // --- ARCHETYPE ASSIGNMENT ---
+        let title = "THE PASSENGER";
+        let color = "#aaa";
+        let good = "You survived the cycle.";
+        let bad = "But you merely existed, you didn't lead.";
+
+        if(team.capital_ratio < 8.0) {
+            title = "THE INSOLVENCY ARTIST"; color = "#ff0055"; score = 0;
+            good = "You provided a great case study on failure.";
+            bad = "You bet the farm and lost the tractor. Regulators seized the keys.";
+        } else if (score > 28) {
+            title = "THE GRANDMASTER"; color = "#00ff9d";
+            good = "Surgical precision. Perfect timing on the throttle and the brakes.";
+            bad = "Honestly? Nothing. You made the rest of us look bad.";
+        } else if (avgRoe > 22 && raroc < 20) {
+            title = "THE ADRENALINE JUNKIE"; color = "#ffaa00";
+            good = "You delivered massive growth in the boom years.";
+            bad = "Your 'Risk Tax' was huge. You got lucky the crash wasn't deeper.";
+        } else if (avgRoe < 16 && team.capital_ratio > 16) {
+            title = "THE VAULT KEEPER"; color = "#00f3ff";
+            good = "Your balance sheet is bulletproof. Regulators love you.";
+            bad = "Shareholders fell asleep. You missed the growth bus completely.";
+        }
+
         team.final_score = Math.round(score * 10) / 10;
+        team.archetype = { title, color };
+        team.commentary = { good, bad };
     });
 }
 
-http.listen(PORT, () => console.log(`v17.2 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v18.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -317,7 +288,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v17.2</title>
+    <title>CRO Cockpit v18.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -353,19 +324,13 @@ const frontendCode = `
         /* MISSION LOG */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: #050810; /* SOLID BLACK */
-            display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
+            background: #050810; display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
         }
         #mission-control.open { display:flex; }
         
         .celestial-body { position: absolute; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
         #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.3; z-index:0; position:absolute; }
-        #saturn { 
-            bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); 
-            width: 700px; height: 500px; 
-            background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; 
-            opacity: 0.3; z-index: 0; position:absolute;
-        }
+        #saturn { bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); width: 700px; height: 500px; background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; opacity: 0.3; z-index: 0; position:absolute; }
 
         .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
         .satellite { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 20; background:white; }
@@ -401,8 +366,8 @@ const frontendCode = `
 
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
-        #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
-        .score-card { width: 60%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; max-height:80vh; overflow-y:auto; }
+        #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; overflow-y:auto; padding:20px; }
+        .score-card { width: 70%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; }
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
@@ -411,6 +376,14 @@ const frontendCode = `
         .cro-row { display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.9em; }
         .cro-lbl { color:#aaa; }
         .cro-val { color:var(--blue); font-weight:bold; }
+        
+        /* ENDGAME STYLES */
+        .rank-card { background:#1a1a1a; margin-bottom:15px; padding:15px; text-align:left; border-left:5px solid #555; }
+        .rank-title { font-size:1.4em; font-weight:bold; margin-bottom:5px; text-transform:uppercase; }
+        .rank-stats { font-size:0.9em; color:#888; margin-bottom:10px; }
+        .feedback-box { background:#000; padding:10px; border:1px dashed #444; font-size:0.9em; color:#ddd; }
+        .fb-good { color:#00ff9d; margin-bottom:5px; }
+        .fb-bad { color:#ff0055; }
     </style>
 </head>
 <body>
@@ -425,7 +398,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v17.2</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v18.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -696,8 +669,16 @@ const frontendCode = `
                 list.innerHTML = '';
                 const sorted = Object.keys(s.teams).sort((a,b) => s.teams[b].final_score - s.teams[a].final_score);
                 sorted.forEach((t, i) => {
-                    list.innerHTML += \`<div style="font-size:1.5em; padding:10px; border-bottom:1px solid #333; color:\${i==0?'var(--green)':'white'}">
-                        #\${i+1} \${t} : \${s.teams[t].final_score} PTS <span style="font-size:0.5em">(RAROC \${s.teams[t].raroc.toFixed(1)}%)</span>
+                    const tm = s.teams[t];
+                    // RENDER DETAILED CARD
+                    list.innerHTML += \`
+                    <div class="rank-card" style="border-left-color: \${tm.archetype.color}">
+                        <div class="rank-title" style="color:\${tm.archetype.color}">#\${i+1} \${t} : \${tm.archetype.title}</div>
+                        <div class="rank-stats">SCORE: \${tm.final_score} | RAROC: \${tm.raroc.toFixed(1)}% | ROE: \${(tm.roe_history.reduce((a,b)=>a+b,0)/tm.roe_history.length).toFixed(1)}%</div>
+                        <div class="feedback-box">
+                            <div class="fb-good">✓ \${tm.commentary.good}</div>
+                            <div class="fb-bad">⚠ \${tm.commentary.bad}</div>
+                        </div>
                     </div>\`;
                 });
                 return;
