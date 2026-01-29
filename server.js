@@ -1,9 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v15.0 - GALACTIC DASHBOARD
- * - Visual: Mixed Chart (Lines for %, Ghost Bars for ₹ Cr).
- * - Visual: Fixed Milky Way Visibility.
- * - Logic: Arrows indicate Slider Movement (Left/Right).
- * - Data: Revenue & Receivables tracking added to history.
+ * CREDIT CARD RISK SIMULATION v16.0 - BLACKOUT EDITION
+ * - Visual Fix: Mission Log is now 100% Opaque (Solid Background).
+ * - Visual: No bleed-through from the game screen.
+ * - Logic: All v15 features (Ghost Bars, Arrows, Mixed Chart) retained.
  * - Port: 3000
  */
 
@@ -47,8 +46,8 @@ const INITIAL_TEAM_STATE = {
     cumulative_capital_usage: 0,
     roe_history: [],
     raroc_history: [],
-    rev_history: [], // New for Bar Chart
-    bal_history: [], // New for Bar Chart
+    rev_history: [],
+    bal_history: [],
     final_score: 0,
     raroc: 0
 };
@@ -97,7 +96,6 @@ io.on('connection', (socket) => {
             else if (gameState.round <= 6) gameState.scenario = 'B';
             else gameState.scenario = 'C';
 
-            // Generate News
             const NEWS_DB = [ "BBG: Trading volume spikes", "CNBC: Analyst downgrade on sector", "WSJ: Consumer credit data delayed" ]; 
             gameState.news_feed = NEWS_DB; 
             
@@ -139,7 +137,6 @@ function runSimulationEngine() {
             vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
         };
 
-        // INPUTS
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
         if(dec.line==='Conservative') {lineRisk=0.85; volMult-=0.04;} 
@@ -154,7 +151,6 @@ function runSimulationEngine() {
         let collBenefit = dec.coll * 0.15; 
         let collCost = dec.coll * 0.25;
 
-        // RISK
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
@@ -168,13 +164,11 @@ function runSimulationEngine() {
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // LOSSES
         const lagIndex = team.risk_history.length - 2; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // PROVISIONS
         team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.8 : 1.1) * 0.8; 
         
         const revenue = team.receivables * 0.14; 
@@ -192,7 +186,6 @@ function runSimulationEngine() {
         const economicCapital = (team.receivables * 0.14) * (histRisk/2); 
         team.cumulative_capital_usage += economicCapital;
         
-        // PUSH HISTORY FOR GRAPH
         team.roe_history.push(team.roe);
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
@@ -202,32 +195,22 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
         else team.capital_ratio += 0.2;
 
-        // ARROW LOGIC (Cleaned Up)
         const getArrow = (curr, prev) => (Number(curr) > Number(prev)) ? "↑" : ((Number(curr) < Number(prev)) ? "↓" : "↔");
         const mapLine = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
-        const mapFrz = (f) => f==='Reactive'?3:(f==='Selective'?2:1);
-
-        let vArr="↔", lArr="↔", cArr="↔", bArr="↔", fArr="↔", clArr="↔";
         
+        let vArr="↔", lArr="↔";
         const prevDec = team.decisions[gameState.round - 1];
         if(prevDec) {
             vArr = getArrow(dec.vol, prevDec.vol);
             lArr = getArrow(mapLine(dec.line), mapLine(prevDec.line));
-            cArr = getArrow(dec.cli, prevDec.cli);
-            bArr = getArrow(dec.bt, prevDec.bt);
-            fArr = getArrow(mapFrz(dec.freeze), mapFrz(prevDec.freeze));
-            clArr = getArrow(dec.coll, prevDec.coll);
         }
 
-        // GENERATE CLEAN LABEL (Only show changes/direction)
-        // We pick the 2 most significant changes to display on the graph to avoid clutter
-        let tag1 = `${vArr} Vol`;
-        let tag2 = `${lArr} Line`;
+        let lineShort = dec.line === 'Conservative' ? 'Cons' : (dec.line === 'Aggressive' ? 'Aggr' : 'Bal');
         
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            dec_summ: `${tag1} | ${tag2}`,
+            dec_summ: `${vArr} Acq | ${lArr} Limit (${lineShort})`,
             met_summ: `Loss:${team.loss_rate.toFixed(1)}% | Cap:${team.capital_ratio.toFixed(1)}%`,
             decision: `Vol:${dec.vol}`,
             impact: `ROE: ${team.roe.toFixed(1)}%`
@@ -247,7 +230,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v15.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v16.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -255,7 +238,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v15.0</title>
+    <title>CRO Cockpit v16.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -288,10 +271,10 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG (GALACTIC DASHBOARD) */
+        /* MISSION LOG (SOLID BACKGROUND FIX) */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: rgba(0,0,0,0.85); /* Semi-transparent so background shows */
+            background: #050810; /* SOLID BLACK - NO BLEED THROUGH */
             display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
         }
         #mission-control.open { display:flex; }
@@ -361,7 +344,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v15.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v16.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -464,8 +447,8 @@ const frontendCode = `
     </div>
     
     <div id="mission-control">
-        <div id="milky-way"></div>
-        <div id="saturn"></div>
+        <div id="milky-way" class="celestial-body"></div>
+        <div id="saturn" class="celestial-body"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; z-index:10; width:100%;">
             <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px; text-shadow:0 0 10px var(--blue);">Strategic Trajectory</h2>
             <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
@@ -544,7 +527,6 @@ const frontendCode = `
             const ctx = document.getElementById('missionChart').getContext('2d');
             if(missionChart) missionChart.destroy();
 
-            // MIXED CHART: LINES FOR %, BARS FOR ₹
             missionChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -573,7 +555,6 @@ const frontendCode = `
         function updateSatellites(logData) {
             document.querySelectorAll('.satellite, .data-label, .guide-line').forEach(e => e.remove());
             const wrapper = document.getElementById('chart-wrapper');
-            // We track satellites on the ROE line (Dataset 0)
             const metaROE = missionChart.getDatasetMeta(0);
             
             metaROE.data.forEach((point, i) => {
@@ -582,7 +563,6 @@ const frontendCode = `
                 createLabel(wrapper, point.x, point.y - stagger, logData[i].dec_summ, 'lbl-decision');
                 createLine(wrapper, point.x, point.y, point.x, point.y - stagger + 15);
                 
-                // Metrics below
                 createLabel(wrapper, point.x, point.y + stagger, logData[i].met_summ, 'lbl-metric');
                 createLine(wrapper, point.x, point.y, point.x, point.y + stagger - 5);
             });
