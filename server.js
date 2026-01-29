@@ -1,8 +1,10 @@
 /**
- * CREDIT CARD RISK SIMULATION v17.0 - DYNAMIC RECORDER
- * - Logic Fix: Mission Log labels now dynamically reflect ALL 6 sliders.
- * - Logic: Detects exactly what changed (Vol, Line, BT, Coll, etc).
- * - Visual: "Blackout" Deep Space Theme retained.
+ * CREDIT CARD RISK SIMULATION v17.2 - GOLD STANDARD
+ * - Math: Calibrated P&L (Yield 18%, CoF, OpEx, Risk Tax).
+ * - Logic: Sniper vs Market Timer scoring balance.
+ * - Content: CRO Intelligence Dashboard added.
+ * - Content: News Feed strictly synchronized to rounds.
+ * - Visual: Deep Space aesthetic, no avatars.
  * - Port: 3000
  */
 
@@ -14,7 +16,8 @@ const io = require('socket.io')(http);
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = "admin"; 
 
-// --- 1. CEO SCRIPT DATABASE ---
+// --- 1. DATABASES ---
+
 const CEO_SCRIPTS = {
     1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
     2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
@@ -25,6 +28,36 @@ const CEO_SCRIPTS = {
     7: "EMERGENCY MEETING. The market is crashing. Who modeled this stress test? Obviously, *your* models were wrong. I'm telling the Board this is a 'systemic event' nobody could foresee, but internally, I know you let the credit quality slip. Freeze everything. If we breach regulatory minimums, the Feds will step in, and I am not going to jail for your incompetence.",
     8: "I'm fighting for my life in these Board meetings. They are looking for a fall guy. Don't give them a reason to look at this desk. Cut the customers off. I don't care about 'brand damage'—I care about solvency. Hoard cash. Make the balance sheet look bulletproof so I can survive the AGM next month.",
     9: "We might survive this, barely. If we do, it's because of my steady hand at the wheel. If we don't, well, I've noted who pushed for volume back in Q1. Clear the bad debt off the books so we can start fresh next year. Don't expect bonuses; be grateful you have a badge to swipe tomorrow."
+};
+
+const NEWS_DB = {
+    'A': [ // BOOM (R1-3)
+        "BBG: Consumer confidence index hits 5-year high",
+        "CNBC: Tech sector hiring spree continues",
+        "WSJ: Retail sales beat expectations by 15%",
+        "RTRS: Banks report record low delinquency rates",
+        "FT: Corporate profits soar, S&P 500 rallies"
+    ],
+    'B': [ // WOBBLE (R4-6)
+        "BBG: Inflation ticks up to 4.2%, Fed watchful",
+        "CNBC: Credit card roll-rates deteriorate slightly",
+        "WSJ: Auto loan delinquencies rise in sub-prime",
+        "RTRS: Retailers report inventory buildup",
+        "FT: Bond yield curve flattens, recession signal?"
+    ],
+    'C': [ // CRASH (R7-9)
+        "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%",
+        "BBG: Liquidity freeze in inter-bank markets",
+        "CNBC: Major retailer files Chapter 11",
+        "WSJ: Unemployment spikes to 7.5% overnight",
+        "RTRS: Central bank emergency rate cut"
+    ]
+};
+
+const CRO_INTEL = {
+    'A': { vital: "PRIME++", cof: "4.5% (Low)", liq: "Abundant" },
+    'B': { vital: "DRIFTING", cof: "6.0% (Rising)", liq: "Tightening" },
+    'C': { vital: "TOXIC", cof: "8.5% (Spike)", liq: "CRITICAL" }
 };
 
 const SCENARIOS = {
@@ -58,7 +91,8 @@ let gameState = {
     scenario: 'A',
     status: 'LOBBY',
     teams: {},
-    news_feed: ["SYSTEM: Waiting for market open..."] 
+    news_feed: ["SYSTEM: Waiting for market open..."],
+    cro_data: { vital: "-", cof: "-", liq: "-" }
 };
 
 app.get('/', (req, res) => res.send(frontendCode));
@@ -92,12 +126,15 @@ io.on('connection', (socket) => {
             gameState.round++;
             gameState.status = 'OPEN';
             
+            // Set Scenario
             if (gameState.round <= 3) gameState.scenario = 'A';
             else if (gameState.round <= 6) gameState.scenario = 'B';
             else gameState.scenario = 'C';
 
-            const NEWS_DB = [ "BBG: Trading volume spikes", "CNBC: Analyst downgrade on sector", "WSJ: Consumer credit data delayed" ]; 
-            gameState.news_feed = NEWS_DB; 
+            // Set News & CRO Data
+            const pool = NEWS_DB[gameState.scenario];
+            gameState.news_feed = pool.sort(() => 0.5 - Math.random()).slice(0, 3);
+            gameState.cro_data = CRO_INTEL[gameState.scenario];
             
             io.emit('state_update', gameState);
         }
@@ -128,7 +165,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (CALIBRATED) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -137,11 +174,14 @@ function runSimulationEngine() {
             vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3
         };
 
-        // INPUTS
+        // 1. INPUTS & MULTIPLIERS
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
-        if(dec.line==='Conservative') {lineRisk=0.85; volMult-=0.04;} 
-        if(dec.line==='Aggressive') {lineRisk=1.3; volMult+=0.08;}
+        
+        // RISK TAX: Aggressive Lines carry higher latent risk
+        let ecFactor = 1.0; 
+        if(dec.line==='Conservative') { lineRisk=0.85; volMult-=0.04; ecFactor=0.9; } 
+        if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; } // Penalty for Icarus strategy
         
         let cliBal = 1 + ((dec.cli - 1) * 0.03); 
         let cliRisk = 1 + ((dec.cli - 1) * 0.07);
@@ -150,64 +190,76 @@ function runSimulationEngine() {
         if(dec.freeze==='Selective') freezeImpact=0.97; 
         if(dec.freeze==='Reactive') freezeImpact=0.92;
         let collBenefit = dec.coll * 0.15; 
-        let collCost = dec.coll * 0.25;
+        
+        // 2. GROWTH & RISK CALCULATION
+        const growth = volMult * cliBal * btBal * freezeImpact;
+        const macro = sc.id === 'C' ? 0.92 : 1.04; // Growth slows in crash
+        team.receivables = team.receivables * growth * macro;
 
-        // RISK
         const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
 
-        let acqCost = 0;
-        if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; 
-        if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   
-
-        const growth = volMult * cliBal * btBal * freezeImpact;
-        const macro = sc.id === 'C' ? 0.85 : 1.04; 
-        team.receivables = team.receivables * growth * macro;
-
+        // 3. LOSS CALCULATION (1-Round Lag)
         const lagIndex = team.risk_history.length - 2; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.8 : 1.1) * 0.8; 
+        // 4. P&L WATERFALL (The Safety Net)
+        const grossYield = 0.18; // 18% Base Income
         
-        const revenue = team.receivables * 0.14; 
-        const opEx = team.receivables * 0.02; 
-        const collEx = team.receivables * (collCost / 100);
-        const acqEx = team.receivables * (acqCost / 100);
+        // Variable Costs based on Scenario
+        let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
         
-        const profit = revenue - (team.receivables * (team.loss_rate/100)) 
-                             - (team.receivables * (team.provisions/100)) 
-                             - opEx - collEx - acqEx;
+        // Efficiency Bonus: High Volume = Lower OpEx
+        let opExRate = 0.035; 
+        if(dec.vol >= 4) opExRate = 0.025; // Reward for growth
+        if(dec.vol <= 2) opExRate = 0.045; // Penalty for shrinking
         
-        team.roe = (profit / (team.receivables * 0.12)) * 100;
+        const grossRevenue = team.receivables * grossYield;
+        const intExp = team.receivables * cof;
+        const opExp = team.receivables * opExRate;
+        const creditCost = team.receivables * (team.loss_rate/100);
+        
+        // Provisioning (IFRS 9 simplified: High in C, Low in A)
+        team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.5 : 0.8);
+        const provCost = team.receivables * (team.provisions/100);
+
+        const profit = grossRevenue - intExp - opExp - creditCost - provCost;
+        
+        // 5. METRICS (ROE & RAROC)
+        // Equity is dynamic based on Capital Ratio
+        const equity = team.receivables * (team.capital_ratio / 100);
+        team.roe = (profit / equity) * 100;
         
         team.cumulative_profit += profit;
-        const economicCapital = (team.receivables * 0.14) * (histRisk/2); 
+        
+        // RAROC uses Economic Capital (Risk Adjusted)
+        const economicCapital = equity * ecFactor * (histRisk/2.5); 
         team.cumulative_capital_usage += economicCapital;
         
+        // Push History
         team.roe_history.push(team.roe);
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
-        team.rev_history.push(revenue);
+        team.rev_history.push(grossRevenue);
         team.bal_history.push(team.receivables);
 
-        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100;
-        else team.capital_ratio += 0.2;
+        // Capital Erosion/Accretion
+        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; // Erosion
+        else team.capital_ratio += 0.2; // Organic generation
 
-        // --- DYNAMIC LABEL GENERATION (The Logic Fix) ---
+        // 6. DYNAMIC LOGGING
         let labelChanges = [];
         const prevDec = team.decisions[gameState.round - 1];
 
         if(!prevDec) {
             labelChanges.push("Initial Deployment");
         } else {
-            // Helper for comparison
             const check = (name, curr, prev, type) => {
                 let c = Number(curr); let p = Number(prev);
-                // Handle String Types
                 if(type === 'line') {
                     const score = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1);
                     c = score(curr); p = score(prev);
@@ -216,7 +268,6 @@ function runSimulationEngine() {
                     const score = (f) => f==='Reactive'?3:(f==='Selective'?2:1);
                     c = score(curr); p = score(prev);
                 }
-                
                 if(c > p) labelChanges.push(`↑ ${name}`);
                 if(c < p) labelChanges.push(`↓ ${name}`);
             };
@@ -229,11 +280,8 @@ function runSimulationEngine() {
             check("Coll", dec.coll, prevDec.coll, 'num');
         }
 
-        // If no changes, show Steady. If too many, take top 2.
         let finalLabel = "Steady State";
-        if(labelChanges.length > 0) {
-            finalLabel = labelChanges.slice(0, 2).join(" | "); // Show max 2 changes to prevent clutter
-        }
+        if(labelChanges.length > 0) finalLabel = labelChanges.slice(0, 2).join(" | ");
         
         team.history_log.unshift({
             round: gameState.round,
@@ -252,13 +300,16 @@ function calculateFinalScores() {
         const raroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc = raroc;
         const avgRoe = team.roe_history.reduce((a,b)=>a+b, 0) / team.roe_history.length;
-        let score = (raroc * 0.7) + (avgRoe * 0.3);
-        if(team.capital_ratio < 8.0) score -= 50;
+        
+        // SCORE FORMULA: 60% Efficiency (RAROC) + 40% Growth (ROE)
+        let score = (raroc * 0.6) + (avgRoe * 0.4);
+        
+        if(team.capital_ratio < 8.0) score -= 50; // Regulatory Breach Penalty
         team.final_score = Math.round(score * 10) / 10;
     });
 }
 
-http.listen(PORT, () => console.log(`v17.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v17.2 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -266,7 +317,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v17.0</title>
+    <title>CRO Cockpit v17.2</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -299,10 +350,10 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG (SOLID BACKGROUND FIX) */
+        /* MISSION LOG */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: #050810; /* SOLID BLACK - NO BLEED THROUGH */
+            background: #050810; /* SOLID BLACK */
             display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
         }
         #mission-control.open { display:flex; }
@@ -330,9 +381,6 @@ const frontendCode = `
         .lbl-metric { top: 25px; color: #00F3FF; }
         .guide-line { position: absolute; width: 1px; background: rgba(255,255,255,0.4); transform: translateX(-50%); z-index:12; }
 
-        @keyframes pulse-g { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
-        @keyframes pulse-b { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
-
         /* CEO TRANSMISSION MODAL */
         #ceo-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -358,6 +406,11 @@ const frontendCode = `
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
+        
+        .cro-box { margin-bottom:15px; border:1px solid #333; padding:10px; background:rgba(0,0,0,0.3); }
+        .cro-row { display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.9em; }
+        .cro-lbl { color:#aaa; }
+        .cro-val { color:var(--blue); font-weight:bold; }
     </style>
 </head>
 <body>
@@ -372,7 +425,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v17.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v17.2</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -464,10 +517,16 @@ const frontendCode = `
                 <div class="glass" style="width: 30%; display:flex; flex-direction:column;">
                     <h4 style="color:var(--red); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CEO PRIORITY</h4>
                     <div id="ceo-msg" style="font-style:italic; margin-bottom:20px; font-size:1.1em; color:#ddd; flex:1; overflow-y:auto;">"System Initializing..."</div>
-                    <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); margin-bottom:20px; font-size:1em;">> VIEW MISSION LOG</button>
+                    
+                    <h4 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CRO INTELLIGENCE</h4>
+                    <div class="cro-box">
+                        <div class="cro-row"><span class="cro-lbl">BUREAU VITALS:</span><span id="cro-vit" class="cro-val">-</span></div>
+                        <div class="cro-row"><span class="cro-lbl">COST OF FUNDS:</span><span id="cro-cof" class="cro-val">-</span></div>
+                        <div class="cro-row"><span class="cro-lbl">LIQUIDITY:</span><span id="cro-liq" class="cro-val">-</span></div>
+                    </div>
+
                     <div style="margin-top:auto;">
-                        <div style="font-size:0.8em; color:#666;">CURRENT SCENARIO</div>
-                        <div id="scen-nm" style="font-size:1.5em; color:var(--blue); font-weight:bold;">MARKET DATA: ENCRYPTED</div>
+                        <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); font-size:1em;">> VIEW MISSION LOG</button>
                     </div>
                 </div>
             </div>
@@ -644,11 +703,15 @@ const frontendCode = `
                 return;
             }
             document.getElementById('rd-ind').innerText = "ROUND " + s.round;
-            document.getElementById('scen-nm').innerText = "MARKET DATA: ENCRYPTED";
             const tDiv = document.getElementById('news-feed');
             tDiv.innerHTML = "";
             s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
             
+            // UPDATE CRO INTEL
+            document.getElementById('cro-vit').innerText = s.cro_data.vital;
+            document.getElementById('cro-cof').innerText = s.cro_data.cof;
+            document.getElementById('cro-liq').innerText = s.cro_data.liq;
+
             const btn = document.getElementById('sub-btn');
             if(s.status === 'OPEN') {
                 document.getElementById('lock-overlay').classList.add('hidden'); 
