@@ -1,9 +1,9 @@
 /**
- * CREDIT CARD RISK SIMULATION v9.0 - ASTRAL MISSION LOG
- * - Feature: Full-screen Deep Space Charting Interface
- * - Feature: Dual-Axis Graph (ROE vs RAROC)
- * - Visual: Pulsing "Satellite" Data Points
- * - Logic: Cumulative RAROC tracked per round for graphing
+ * CREDIT CARD RISK SIMULATION v10.0 - MILKY WAY EDITION
+ * - Visual: Milky Way Background
+ * - Visual: High-Contrast "Floating" Labels (Gold/Cyan)
+ * - Visual: Single Axis for ROE/RAROC
+ * - Logic: 1-Quarter Lag Math (v8.0 Engine)
  * - Port: 3000
  */
 
@@ -88,7 +88,7 @@ const INITIAL_TEAM_STATE = {
     cumulative_profit: 0,
     cumulative_capital_usage: 0,
     roe_history: [],
-    raroc_history: [], // Added for graph
+    raroc_history: [],
     final_score: 0,
     raroc: 0
 };
@@ -163,7 +163,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (1-QUARTER LAG) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -197,12 +197,11 @@ function runSimulationEngine() {
         if(dec.vol > 3) acqCost += (dec.vol - 3) * 0.5; 
         if(dec.bt > 2) acqCost += (dec.bt - 2) * 0.3;   
 
-        // GROWTH
         const growth = volMult * cliBal * btBal * freezeImpact;
         const macro = sc.id === 'C' ? 0.85 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // LOSSES
+        // LOSSES (1-LAG)
         const lagIndex = team.risk_history.length - 2; 
         const histRisk = team.risk_history[Math.max(0, lagIndex)];
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
@@ -227,7 +226,6 @@ function runSimulationEngine() {
         team.cumulative_capital_usage += economicCapital;
         team.roe_history.push(team.roe);
 
-        // Calculate Round RAROC (Cumulative)
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
 
@@ -237,8 +235,11 @@ function runSimulationEngine() {
         team.history_log.unshift({
             round: gameState.round,
             scenario: gameState.scenario,
-            dec_summ: "V:"+dec.vol+" L:"+dec.line.substring(0,4)+" BT:"+dec.bt,
-            met_summ: "ROE:"+team.roe.toFixed(1)+"% L:"+team.loss_rate.toFixed(1)+"%",
+            // Full Decision Text for Graph
+            dec_summ: "Vol:"+dec.vol+" | Line:"+dec.line.substring(0,4)+" | Ups:"+dec.cli,
+            // Full Metric Text for Graph
+            met_summ: "Loss:"+team.loss_rate.toFixed(1)+"% | Cap:"+team.capital_ratio.toFixed(1)+"%",
+            
             decision: "Vol:"+dec.vol+" | Line:"+dec.line+" | CLI:"+dec.cli,
             impact: "ROE: "+team.roe.toFixed(1)+"% | Loss: "+team.loss_rate.toFixed(1)+"%"
         });
@@ -257,7 +258,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v9.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v10.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -265,7 +266,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v9.0</title>
+    <title>CRO Cockpit v10.0</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -282,73 +283,56 @@ const frontendCode = `
         .screen.active { display:flex; }
         .glass { background: var(--glass); border: 1px solid #333; box-shadow: 0 0 20px rgba(0,0,0,0.8); border-radius: 4px; padding: 15px; display:flex; flex-direction:column; }
         
-        /* HUD & Controls */
         #hud { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
         .metric { text-align: center; border-top: 2px solid var(--blue); padding: 10px; } 
         .val { font-size: 1.8em; font-weight: bold; letter-spacing: 1px; }
         .control-scroll-area { flex:1; overflow-y:auto; padding-right:5px; margin-bottom:10px; border-bottom:1px solid #333; }
         .control-row { margin-bottom: 15px; border-bottom: 1px dashed #333; padding-bottom: 10px; position:relative; }
         .control-row label { display: block; color: var(--blue); margin-bottom: 5px; font-weight: bold; text-transform:uppercase; font-size:0.8em; }
-        
         .btn-group { display: flex; gap: 2px; margin-top:5px; background:#111; padding:2px; }
         .btn-opt { flex: 1; background: #222; color: #666; padding: 8px; cursor: pointer; text-align: center; font-size:0.8em; border:1px solid #333; transition:0.2s; }
-        .btn-opt:hover { background: #333; }
         .btn-opt.selected { background: var(--blue); color: #000; font-weight: bold; border-color:var(--blue); box-shadow: 0 0 10px var(--blue); }
         input[type=range] { width: 100%; accent-color: var(--blue); margin-top:5px; cursor:pointer; }
-        
-        /* SENSITIVITY PANEL */
         .sens-btn { background:none; border:none; color:#666; font-size:0.8em; cursor:pointer; margin-top:5px; }
-        .sens-btn:hover { color:var(--blue); }
         .sens-panel { background:#111; border-top:1px solid #333; padding:10px; margin-top:5px; display:none; grid-template-columns: 1fr 1fr; gap:10px; font-size:0.8em; }
         .sens-panel.open { display:grid; }
-        .sens-item { color:#aaa; }
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG (ASTRAL GRAPH) */
+        /* MISSION LOG (MILKY WAY) */
         #mission-control {
             position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: radial-gradient(circle at center, #0B1021 0%, #000000 100%);
-            display:none; flex-direction:column; padding:20px; box-sizing:border-box;
+            background: radial-gradient(circle at center, #0B1021 0%, #000 100%);
+            display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
         }
         #mission-control.open { display:flex; }
         
-        /* SATELLITE POINTS (Overlay on Chart) */
-        .chart-container { position:relative; flex:1; width:100%; margin-top:20px; }
-        .satellite-point {
-            position: absolute; width: 12px; height: 12px; border-radius: 50%;
-            background: white; transform: translate(-50%, -50%);
-            box-shadow: 0 0 10px var(--blue), 0 0 20px var(--blue);
-            animation: pulse 3s infinite ease-in-out;
-            cursor: pointer; z-index:10;
-        }
-        .sat-label-top {
-            position:absolute; bottom:15px; left:50%; transform:translateX(-50%);
-            white-space:nowrap; font-size:0.75em; color:var(--blue); 
-            background:rgba(0,0,0,0.7); padding:2px 5px; border-radius:3px;
-            border:1px solid #333; pointer-events:none;
-        }
-        .sat-label-btm {
-            position:absolute; top:15px; left:50%; transform:translateX(-50%);
-            white-space:nowrap; font-size:0.75em; color:var(--green); 
-            background:rgba(0,0,0,0.7); padding:2px 5px; border-radius:3px;
-            border:1px solid #333; pointer-events:none;
-        }
+        .celestial-body { position: absolute; opacity: 0.6; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
+        #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.4; z-index:0; }
+        #jupiter { top: 10%; right: 10%; width: 300px; height: 300px; background: url('https://upload.wikimedia.org/wikipedia/commons/e/e2/Jupiter.jpg') no-repeat center/contain; opacity: 0.3; border-radius:50%; }
 
-        @keyframes pulse {
-            0% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
-            50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 0 20px var(--blue), 0 0 40px var(--blue); }
-            100% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }
+        .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
+        .satellite { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 20; background:white; }
+        .sat-green { box-shadow: 0 0 15px #00ff9d; animation: pulse-g 3s infinite; }
+        .sat-blue { box-shadow: 0 0 15px #00f3ff; animation: pulse-b 4s infinite reverse; }
+        
+        .data-label { 
+            position:absolute; transform:translateX(-50%); white-space:nowrap; 
+            font-size:0.8em; font-weight:bold; letter-spacing:1px; z-index:15;
+            padding:2px 6px; border-radius:4px; backdrop-filter:blur(3px); /* Subtle glass backing */
         }
+        .lbl-decision { bottom: 25px; color: #FFD700; text-shadow: 0 0 5px #000; border-bottom:1px solid #FFD700; }
+        .lbl-metric { top: 25px; color: #00F3FF; text-shadow: 0 0 5px #000; border-top:1px solid #00F3FF; }
+        .guide-line { position: absolute; width: 1px; background: rgba(255,255,255,0.2); transform: translateX(-50%); z-index:12; }
 
-        /* LAYOUT HELPERS */
+        @keyframes pulse-g { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
+        @keyframes pulse-b { 0% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); } 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(0.9); } }
+
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
         #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; }
         .score-card { width: 60%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; max-height:80vh; overflow-y:auto; }
-
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
-        button.main-btn:hover:not(:disabled) { background: var(--blue); color: #000; box-shadow: 0 0 20px var(--blue); }
         button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
     </style>
@@ -365,7 +349,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v9.0</h2>
+                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v10.0</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -412,14 +396,8 @@ const frontendCode = `
                             </div>
                             <input type="range" id="i-vol" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-vol')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-vol" class="sens-panel">
-                                <div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div>
-                                <div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div>
-                                <div class="sens-item">Cap Usage <span class="sens-val neg">+2.0%</span></div>
-                                <div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.5%</span></div>
-                            </div>
+                            <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div></div>
                         </div>
-
                         <div class="control-row">
                             <label>2. INITIAL LINE ASSIGNMENT</label>
                             <div class="btn-group" id="grp-line">
@@ -428,38 +406,20 @@ const frontendCode = `
                                 <div class="btn-opt" onclick="selBtn('grp-line', 'Aggressive')">Aggressive</div>
                             </div>
                             <button class="sens-btn" onclick="toggleSens('sens-line')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-line" class="sens-panel">
-                                <div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div>
-                                <div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div>
-                                <div class="sens-item">Cap Usage <span class="sens-val neg">+5.0%</span></div>
-                                <div class="sens-item">Cost Impact <span class="sens-val">None</span></div>
-                            </div>
+                            <div id="sens-line" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div></div>
                         </div>
-
                         <div class="control-row">
                             <label>3. UPSELL AGGRESSION</label>
                             <input type="range" id="i-cli" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-cli" class="sens-panel">
-                                <div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div>
-                                <div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div>
-                                <div class="sens-item">Cap Usage <span class="sens-val neg">+1.5%</span></div>
-                                <div class="sens-item">Loss Lag <span class="sens-val neg">Med</span></div>
-                            </div>
+                            <div id="sens-cli" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div></div>
                         </div>
-
                         <div class="control-row">
                             <label>4. BALANCE TRANSFER PUSH</label>
                             <input type="range" id="i-bt" min="1" max="5" value="1" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-bt')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-bt" class="sens-panel">
-                                <div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div>
-                                <div class="sens-item">Churn Risk <span class="sens-val neg">High</span></div>
-                                <div class="sens-item">Acq Cost <span class="sens-val neg">+0.3%</span></div>
-                                <div class="sens-item">Prov Impact <span class="sens-val">Low</span></div>
-                            </div>
+                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Churn Risk <span class="sens-val neg">High</span></div></div>
                         </div>
-
                         <div class="control-row">
                             <label>5. PORTFOLIO ACTIONS</label>
                             <div class="btn-group" id="grp-frz">
@@ -468,29 +428,17 @@ const frontendCode = `
                                 <div class="btn-opt" onclick="selBtn('grp-frz', 'Reactive')">Reactive</div>
                             </div>
                             <button class="sens-btn" onclick="toggleSens('sens-frz')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-frz" class="sens-panel">
-                                <div class="sens-item">Return Impact <span class="sens-val neg">-5.0%</span></div>
-                                <div class="sens-item">Loss Reduction <span class="sens-val">+0.5%</span></div>
-                                <div class="sens-item">Cap Relief <span class="sens-val">+2.0%</span></div>
-                                <div class="sens-item">Cost Impact <span class="sens-val">Low</span></div>
-                            </div>
+                            <div id="sens-frz" class="sens-panel"><div class="sens-item">Return Impact <span class="sens-val neg">-5.0%</span></div><div class="sens-item">Loss Reduction <span class="sens-val">+0.5%</span></div></div>
                         </div>
-
                         <div class="control-row">
                             <label>6. COLLECTIONS INTENSITY</label>
                             <input type="range" id="i-coll" min="1" max="5" value="3" oninput="updContext()">
                             <button class="sens-btn" onclick="toggleSens('sens-coll')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-coll" class="sens-panel">
-                                <div class="sens-item">Loss Reduction <span class="sens-val">+0.2%</span></div>
-                                <div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3%</span></div>
-                                <div class="sens-item">Return Impact <span class="sens-val neg">None</span></div>
-                                <div class="sens-item">Cap Usage <span class="sens-val">Neutral</span></div>
-                            </div>
+                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.2%</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3%</span></div></div>
                         </div>
                     </div>
                     <button id="sub-btn" class="main-btn" onclick="submit()" disabled>WAITING FOR MARKET...</button>
                 </div>
-                
                 <div class="glass" style="width: 30%; display:flex; flex-direction:column;">
                     <h4 style="color:var(--red); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CEO PRIORITY</h4>
                     <div id="ceo-msg" style="font-style:italic; margin-bottom:20px; font-size:1.1em; color:#ddd; flex:1; overflow-y:auto;">"System Initializing..."</div>
@@ -505,19 +453,20 @@ const frontendCode = `
     </div>
     
     <div id="mission-control">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px;">Strategic Trajectory</h2>
+        <div id="milky-way" class="celestial-body"></div>
+        <div id="jupiter" class="celestial-body"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; z-index:10; width:100%;">
+            <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px; text-shadow:0 0 10px var(--blue);">Strategic Trajectory</h2>
             <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
         </div>
         <div class="chart-container" id="chart-wrapper">
             <canvas id="missionChart"></canvas>
-            </div>
+        </div>
     </div>
 
     <div id="endgame-screen">
         <div class="score-card">
             <h1 style="color:var(--amber); font-size:3em; margin:0;">SIMULATION COMPLETE</h1>
-            <p>MARKET CLOSED PERMANENTLY</p>
             <div id="final-scores" style="text-align:left; margin-top:30px;"></div>
             <button onclick="location.reload()" style="margin-top:30px; padding:10px; background:#333; color:white; border:none; cursor:pointer;">RESET SYSTEM</button>
         </div>
@@ -560,18 +509,11 @@ const frontendCode = `
             document.getElementById('lock-overlay').classList.remove('hidden');
         }
 
-        // --- GRAPHING LOGIC ---
-        function showMissionLog() {
-            document.getElementById('mission-control').classList.add('open');
-            renderChart();
-        }
-        function closeMissionLog() {
-            document.getElementById('mission-control').classList.remove('open');
-        }
+        function showMissionLog() { document.getElementById('mission-control').classList.add('open'); renderChart(); }
+        function closeMissionLog() { document.getElementById('mission-control').classList.remove('open'); }
 
         function renderChart() {
             if(!teamDataRef) return;
-            // Process Data: Reverse chronological log to linear arrays
             const sortedLog = [...teamDataRef.history_log].reverse();
             const roeData = teamDataRef.roe_history;
             const rarocData = teamDataRef.raroc_history;
@@ -585,56 +527,56 @@ const frontendCode = `
                 data: {
                     labels: rounds,
                     datasets: [
-                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: 'rgba(0,255,157,0.1)', yAxisID: 'y', tension: 0.4 },
-                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: 'rgba(0,243,255,0.1)', yAxisID: 'y1', tension: 0.4 }
+                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: 'rgba(0,255,157,0.1)', tension: 0.4 },
+                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: 'rgba(0,243,255,0.1)', tension: 0.4 }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    interaction: { mode: 'index', intersect: false },
                     scales: {
-                        y: { type: 'linear', display: true, position: 'left', grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#00ff9d' } },
-                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#00f3ff' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#fff' } },
                         x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
                     },
-                    animation: {
-                        onComplete: () => { updateSatellites(sortedLog); }
-                    }
+                    animation: { onComplete: () => { updateSatellites(sortedLog); } }
                 }
             });
         }
 
         function updateSatellites(logData) {
-            // Remove old sats
-            document.querySelectorAll('.satellite-point, .sat-label-top, .sat-label-btm').forEach(e => e.remove());
+            document.querySelectorAll('.satellite, .data-label, .guide-line').forEach(e => e.remove());
             const wrapper = document.getElementById('chart-wrapper');
-            const meta = missionChart.getDatasetMeta(0); // Use ROE line for position reference
+            const metaROE = missionChart.getDatasetMeta(0);
+            const metaRAROC = missionChart.getDatasetMeta(1);
             
-            meta.data.forEach((point, index) => {
-                // Create Satellite
-                const sat = document.createElement('div');
-                sat.className = 'satellite-point';
-                sat.style.left = point.x + 'px';
-                sat.style.top = point.y + 'px';
-                wrapper.appendChild(sat);
-
-                // Create Top Label (Decisions)
-                const topLab = document.createElement('div');
-                topLab.className = 'sat-label-top';
-                topLab.innerText = logData[index].dec_summ;
-                topLab.style.left = point.x + 'px';
-                topLab.style.bottom = (wrapper.clientHeight - point.y + 15) + 'px';
-                wrapper.appendChild(topLab);
-
-                // Create Bottom Label (Outcomes)
-                const btmLab = document.createElement('div');
-                btmLab.className = 'sat-label-btm';
-                btmLab.innerText = logData[index].met_summ;
-                btmLab.style.left = point.x + 'px';
-                btmLab.style.top = (point.y + 15) + 'px';
-                wrapper.appendChild(btmLab);
+            metaROE.data.forEach((point, i) => {
+                createSat(wrapper, point.x, point.y, 'sat-green');
+                const stagger = (i % 2 === 0) ? 40 : 70; 
+                createLabel(wrapper, point.x, point.y - stagger, logData[i].dec_summ, 'lbl-decision');
+                createLine(wrapper, point.x, point.y, point.x, point.y - stagger + 15);
             });
+
+            metaRAROC.data.forEach((point, i) => {
+                createSat(wrapper, point.x, point.y, 'sat-blue');
+                const stagger = (i % 2 === 0) ? 40 : 70;
+                createLabel(wrapper, point.x, point.y + stagger, logData[i].met_summ, 'lbl-metric');
+                createLine(wrapper, point.x, point.y, point.x, point.y + stagger - 5);
+            });
+        }
+
+        function createSat(parent, x, y, cls) {
+            const el = document.createElement('div'); el.className = \`satellite \${cls}\`;
+            el.style.left = x + 'px'; el.style.top = y + 'px'; parent.appendChild(el);
+        }
+        function createLabel(parent, x, y, text, cls) {
+            const el = document.createElement('div'); el.className = \`data-label \${cls}\`;
+            el.innerText = text; el.style.left = x + 'px'; el.style.top = y + 'px'; parent.appendChild(el);
+        }
+        function createLine(parent, x1, y1, x2, y2) {
+            const height = Math.abs(y2 - y1);
+            const el = document.createElement('div'); el.className = 'guide-line';
+            el.style.height = height + 'px'; el.style.left = x1 + 'px'; el.style.top = Math.min(y1, y2) + 'px';
+            parent.appendChild(el);
         }
 
         socket.on('auth_success', (res) => {
@@ -656,7 +598,9 @@ const frontendCode = `
                 list.innerHTML = '';
                 const sorted = Object.keys(s.teams).sort((a,b) => s.teams[b].final_score - s.teams[a].final_score);
                 sorted.forEach((t, i) => {
-                    list.innerHTML += '<div style="font-size:1.5em; padding:10px; border-bottom:1px solid #333; color:'+(i==0?'var(--green)':'white')+'">#'+(i+1)+' '+t+' : '+s.teams[t].final_score+' PTS <span style="font-size:0.5em">(RAROC '+s.teams[t].raroc.toFixed(1)+'%)</span></div>';
+                    list.innerHTML += \`<div style="font-size:1.5em; padding:10px; border-bottom:1px solid #333; color:\${i==0?'var(--green)':'white'}">
+                        #\${i+1} \${t} : \${s.teams[t].final_score} PTS <span style="font-size:0.5em">(RAROC \${s.teams[t].raroc.toFixed(1)}%)</span>
+                    </div>\`;
                 });
                 return;
             }
@@ -664,9 +608,7 @@ const frontendCode = `
             document.getElementById('scen-nm').innerText = s.scenario === 'A' ? "EXPANSION" : (s.scenario === 'B' ? "LATE CYCLE" : "SHOCK");
             const tDiv = document.getElementById('news-feed');
             tDiv.innerHTML = "";
-            s.news_feed.forEach(n => {
-                tDiv.innerHTML += '<div class="ticker-item">'+n+'</div>';
-            });
+            s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
             let ceo = "Grow the book! Competitors are moving fast.";
             if(s.scenario === 'B') ceo = "I'm seeing red flags. Keep growing but watch the quality.";
             if(s.scenario === 'C') ceo = "WE ARE BLEEDING! Protect Capital at all costs!";
@@ -674,20 +616,14 @@ const frontendCode = `
             const btn = document.getElementById('sub-btn');
             if(s.status === 'OPEN') {
                 document.getElementById('lock-overlay').classList.add('hidden'); 
-                btn.disabled = false;
-                btn.innerText = "SUBMIT DECISION";
+                btn.disabled = false; btn.innerText = "SUBMIT DECISION";
             } else {
-                btn.disabled = true;
-                btn.innerText = "MARKET CLOSED";
+                btn.disabled = true; btn.innerText = "MARKET CLOSED";
             }
-            const adminDiv = document.getElementById('admin-ui');
-            if(adminDiv.classList.contains('active')) updAdmin(s);
+            if(document.getElementById('admin-ui').classList.contains('active')) updAdmin(s);
         });
         socket.on('team_data_update', (msg) => {
-            if(msg.name === myTeam) {
-                teamDataRef = msg.data;
-                updTeam(msg.data, null);
-            }
+            if(msg.name === myTeam) { teamDataRef = msg.data; updTeam(msg.data, null); }
         });
         function updTeam(d, s) {
             document.getElementById('d-roe').innerText = d.roe.toFixed(1) + "%";
@@ -707,14 +643,22 @@ const frontendCode = `
                 if(team.decisions[s.round]) {
                     const d = team.decisions[s.round];
                     decStatus = '<span style="color:var(--green)">LOCKED</span>';
-                    decDetail = '<div style="margin-top:5px; font-size:0.8em; color:#aaa; border-top:1px solid #333; padding-top:5px;">' +
-                        'Vol: <b style="color:white">'+d.vol+'</b> | Line: <b style="color:white">'+d.line+'</b><br>' +
-                        'CLI: <b>'+d.cli+'</b> | BT: <b>'+d.bt+'</b> | Frz: <b>'+d.freeze+'</b>' +
-                        '</div>';
+                    decDetail = \`<div style="margin-top:5px; font-size:0.8em; color:#aaa; border-top:1px solid #333; padding-top:5px;">
+                        Vol: <b style="color:white">\${d.vol}</b> | Line: <b style="color:white">\${d.line}</b><br>
+                        CLI: <b>\${d.cli}</b> | BT: <b>\${d.bt}</b> | Frz: <b>\${d.freeze}</b>
+                        </div>\`;
                 }
-                l.innerHTML += '<div class="glass" style="padding:10px;"><div style="display:flex; justify-content:space-between;"><div style="color:var(--blue); font-weight:bold; font-size:1.2em;">'+t+'</div><div>'+decStatus+'</div></div><div style="font-size:0.9em; margin-top:5px;">ROE: '+team.roe.toFixed(1)+'% | Cap: '+team.capital_ratio.toFixed(1)+'%</div>'+decDetail+'</div>';
+                l.innerHTML += \`<div class="glass" style="padding:10px;">
+                    <div style="display:flex; justify-content:space-between;">
+                        <div style="color:var(--blue); font-weight:bold; font-size:1.2em;">\${t}</div>
+                        <div>\${decStatus}</div>
+                    </div>
+                    <div style="font-size:0.9em; margin-top:5px;">ROE: \${team.roe.toFixed(1)}% | Cap: \${team.capital_ratio.toFixed(1)}%</div>
+                    \${decDetail}
+                </div>\`;
             });
         }
+        window.addEventListener('resize', () => { if(missionChart) { missionChart.resize(); renderOverlay(); } });
     </script>
 </body>
 </html>
