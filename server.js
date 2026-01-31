@@ -766,3 +766,4 @@ const frontendCode = `
     </script>
 </body>
 </html>
+`;
