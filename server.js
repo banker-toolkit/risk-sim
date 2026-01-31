@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v18.2 - PREDICTIVE INTELLIGENCE
- * - Content: CRO Panel now provides 9 distinct, forward-looking risk signals.
- * - Logic: Solvency Logic (Recapitalization) retained.
- * - Visual: Deep Space Theme retained.
+ * CREDIT CARD RISK SIMULATION v19.0 - CAPTAIN'S ROOM
+ * - Theme: "Captain's Room" Branding.
+ * - Logic: Solvency Logic (Recapitalization) active.
+ * - Content: Predictive CRO Intel active.
  * - Port: 3000
  */
 
@@ -34,7 +34,6 @@ const NEWS_DB = {
     'C': [ "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%", "BBG: Liquidity freeze in inter-bank markets", "WSJ: Unemployment spikes to 7.5%" ]
 };
 
-// --- NEW: ROUND-SPECIFIC FORWARD LOOKING INTEL ---
 const CRO_INTEL_DB = {
     1: { vital: "Vintage Analysis: Clean.", cof: "Swap Curve: Flat/Stable.", liq: "Excess Capital Deployment Rec." },
     2: { vital: "FICO Bands: 700+ strong.", cof: "Spreads: Tight (Cheap).", liq: "Buffer: Healthy." },
@@ -120,8 +119,6 @@ io.on('connection', (socket) => {
             else gameState.scenario = 'C';
 
             gameState.news_feed = NEWS_DB[gameState.scenario].sort(() => 0.5 - Math.random()).slice(0, 3);
-            
-            // PULL ROUND-SPECIFIC CRO DATA
             gameState.cro_data = CRO_INTEL_DB[gameState.round] || { vital: "No Data", cof: "No Data", liq: "No Data" };
             
             io.emit('state_update', gameState);
@@ -153,14 +150,13 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (SOLVENCY LOGIC) ---
+// --- 3. MATH ENGINE ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
         const dec = team.decisions[gameState.round] || { vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3 };
 
-        // Inputs
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
         let lineRisk = 1.0; 
         let ecFactor = 1.0; 
@@ -189,7 +185,6 @@ function runSimulationEngine() {
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // P&L
         const grossYield = 0.18; 
         let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
         let opExRate = 0.035; 
@@ -211,7 +206,6 @@ function runSimulationEngine() {
 
         // FORCED RECAPITALIZATION LOGIC
         let finalEquity = team.receivables * (team.capital_ratio / 100);
-        
         if (team.capital_ratio < 10.0) {
             const requiredEquity = team.receivables * 0.10;
             finalEquity = requiredEquity;
@@ -219,11 +213,10 @@ function runSimulationEngine() {
         }
 
         team.roe = (profit / finalEquity) * 100;
-        
         team.cumulative_profit += profit;
+        
         const riskPenalty = team.capital_ratio === 10.0 ? 1.5 : 1.0;
         const economicCapital = finalEquity * ecFactor * riskPenalty; 
-        
         team.cumulative_capital_usage += economicCapital;
         
         team.roe_history.push(team.roe);
@@ -232,7 +225,6 @@ function runSimulationEngine() {
         team.rev_history.push(grossRevenue);
         team.bal_history.push(team.receivables);
 
-        // Logging
         let labelChanges = [];
         const prevDec = team.decisions[gameState.round - 1];
         if(!prevDec) labelChanges.push("Initial Deployment");
@@ -298,7 +290,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v18.2 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v19.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -306,7 +298,7 @@ const frontendCode = `
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CRO Cockpit v18.2</title>
+    <title>Captain's Room</title>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -339,13 +331,8 @@ const frontendCode = `
         .sens-val { color:var(--green); font-weight:bold; float:right; }
         .sens-val.neg { color:var(--red); }
 
-        /* MISSION LOG */
-        #mission-control {
-            position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000;
-            background: #050810; display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden;
-        }
+        #mission-control { position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000; background: #050810; display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden; }
         #mission-control.open { display:flex; }
-        
         .celestial-body { position: absolute; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
         #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.3; z-index:0; position:absolute; }
         #saturn { bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); width: 700px; height: 500px; background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; opacity: 0.3; z-index: 0; position:absolute; }
@@ -355,28 +342,14 @@ const frontendCode = `
         .sat-green { box-shadow: 0 0 15px #00ff9d; animation: pulse-g 3s infinite; }
         .sat-blue { box-shadow: 0 0 15px #00f3ff; animation: pulse-b 4s infinite reverse; }
         
-        .data-label { 
-            position:absolute; transform:translateX(-50%); white-space:nowrap; 
-            font-size:0.8em; font-weight:bold; letter-spacing:1px; z-index:15;
-            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 2px 2px 4px black;
-        }
+        .data-label { position:absolute; transform:translateX(-50%); white-space:nowrap; font-size:0.8em; font-weight:bold; letter-spacing:1px; z-index:15; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 2px 2px 4px black; }
         .lbl-decision { bottom: 25px; color: #FFD700; }
         .lbl-metric { top: 25px; color: #00F3FF; }
         .guide-line { position: absolute; width: 1px; background: rgba(255,255,255,0.4); transform: translateX(-50%); z-index:12; }
 
-        /* CEO TRANSMISSION MODAL */
-        #ceo-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.95); z-index: 3000;
-            display: none; justify-content: center; align-items: center; flex-direction: column;
-            backdrop-filter: blur(5px);
-        }
+        #ceo-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px); }
         #ceo-overlay.active { display: flex; }
-        .transmission-box {
-            width: 70%; max-width: 800px; border: 2px solid var(--red);
-            background: #110505; padding: 40px; box-shadow: 0 0 50px rgba(255, 0, 85, 0.3);
-            text-align: center; position: relative;
-        }
+        .transmission-box { width: 70%; max-width: 800px; border: 2px solid var(--red); background: #110505; padding: 40px; box-shadow: 0 0 50px rgba(255, 0, 85, 0.3); text-align: center; position: relative; }
         .trans-header { color: var(--red); font-size: 1.5em; letter-spacing: 5px; margin-bottom: 20px; font-weight: bold; border-bottom: 1px solid var(--red); padding-bottom: 10px; }
         .trans-body { color: #fff; font-size: 1.2em; line-height: 1.6; font-family: 'Courier New', monospace; margin-bottom: 30px; text-align: left; }
         .ack-btn { background: var(--red); color: white; border: none; padding: 15px 30px; font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; }
@@ -414,12 +387,12 @@ const frontendCode = `
     </div>
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
-            <div class="glass" style="width: 300px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0;">RISK SIMULATOR v18.2</h2>
-                <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase;">
+            <div class="glass" style="width: 320px; text-align: center;">
+                <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // TERMINAL ACCESS</h2>
+                <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase; text-align:center;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
-                    <input id="aPass" type="password" placeholder="ADMIN KEY" style="padding:5px; background:#111; border:1px solid #444; color:white;">
+                    <input id="aPass" type="password" placeholder="ADMIN KEY" style="padding:5px; background:#111; border:1px solid #444; color:white; text-align:center;">
                     <button onclick="login('admin')" style="background:none; border:1px solid #666; color:#666; cursor:pointer; padding:5px;">AUTH</button>
                 </div>
             </div>
