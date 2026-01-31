@@ -1,8 +1,9 @@
 /**
- * CREDIT CARD RISK SIMULATION v19.0 - CAPTAIN'S ROOM
- * - Theme: "Captain's Room" Branding.
- * - Logic: Solvency Logic (Recapitalization) active.
- * - Content: Predictive CRO Intel active.
+ * CREDIT CARD RISK SIMULATION v21.0 - ANALOG MATH
+ * - Feature: Sliders now support 0.5 increments.
+ * - Math: All Logic converted from "Steps" to "Linear Curves" (Smoothed).
+ * - Logic: Zombie Protocol & Solvency Logic retained.
+ * - Theme: Captain's Room.
  * - Port: 3000
  */
 
@@ -70,7 +71,8 @@ const INITIAL_TEAM_STATE = {
     final_score: 0,
     raroc: 0,
     archetype: {}, 
-    commentary: {} 
+    commentary: {},
+    is_zombie: false 
 };
 
 // --- 2. STATE ---
@@ -150,25 +152,37 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (ANALOG CURVES) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
         const dec = team.decisions[gameState.round] || { vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3 };
 
+        // 0. ZOMBIE PROTOCOL
+        if (team.is_zombie) {
+            dec.vol = 1; 
+            dec.line = 'Conservative'; 
+        }
+
+        // 1. ANALOG INPUTS (Linear Curves)
+        // Vol: Linear Growth Multiplier
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
-        let lineRisk = 1.0; 
-        let ecFactor = 1.0; 
+        
+        let lineRisk = 1.0; let ecFactor = 1.0; 
         if(dec.line==='Conservative') { lineRisk=0.85; volMult-=0.04; ecFactor=0.9; } 
         if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; }
         
+        // CLI & BT: Linear Scaling
         let cliBal = 1 + ((dec.cli - 1) * 0.03); 
         let cliRisk = 1 + ((dec.cli - 1) * 0.07);
         let btBal = 1 + ((dec.bt - 1) * 0.04);
+        
         let freezeImpact = 1.0; 
         if(dec.freeze==='Selective') freezeImpact=0.97; 
         if(dec.freeze==='Reactive') freezeImpact=0.92;
+        
+        // Coll: Linear Benefit (0.15% per point)
         let collBenefit = dec.coll * 0.15; 
         
         const growth = volMult * cliBal * btBal * freezeImpact;
@@ -185,12 +199,22 @@ function runSimulationEngine() {
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        const grossYield = 0.18; 
-        let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        let opExRate = 0.035; 
-        if(dec.vol >= 4) opExRate = 0.025; 
-        if(dec.vol <= 2) opExRate = 0.045; 
+        // 2. P&L (ANALOG COSTS)
         
+        // Yield Dilution Curve: 18% base, drops by 0.3% for every BT point
+        // Low BT(1)=17.7%, High BT(5)=16.5%
+        let grossYield = 0.18 - (dec.bt * 0.003); 
+
+        let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
+        
+        // OpEx Curve: Linear Drop based on Volume (Efficiency)
+        // Vol 1 = 4.5%, Vol 5 = 2.5%.  Formula: 5.0% - (0.5% * Vol)
+        let opExRate = 0.05 - (dec.vol * 0.005); 
+        
+        // Collection Cost Curve: Linear Cost Increase
+        // Coll 1 = 0.2%, Coll 5 = 1.0%. Formula: 0.2% * Coll
+        opExRate += (dec.coll * 0.002);
+
         const grossRevenue = team.receivables * grossYield;
         const intExp = team.receivables * cof;
         const opExp = team.receivables * opExRate;
@@ -204,18 +228,21 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
         else team.capital_ratio += 0.2; 
 
-        // FORCED RECAPITALIZATION LOGIC
+        // 3. ZOMBIE PROTOCOL
         let finalEquity = team.receivables * (team.capital_ratio / 100);
+        
         if (team.capital_ratio < 10.0) {
             const requiredEquity = team.receivables * 0.10;
-            finalEquity = requiredEquity;
+            const deficit = requiredEquity - finalEquity;
+            finalEquity = finalEquity + (deficit * 1.5); 
             team.capital_ratio = 10.0; 
+            team.is_zombie = true; 
         }
 
         team.roe = (profit / finalEquity) * 100;
         team.cumulative_profit += profit;
         
-        const riskPenalty = team.capital_ratio === 10.0 ? 1.5 : 1.0;
+        const riskPenalty = team.is_zombie ? 1.5 : 1.0;
         const economicCapital = finalEquity * ecFactor * riskPenalty; 
         team.cumulative_capital_usage += economicCapital;
         
@@ -240,8 +267,10 @@ function runSimulationEngine() {
             check("Upsell", dec.cli, prevDec.cli, 'num'); check("BT", dec.bt, prevDec.bt, 'num');
             check("Action", dec.freeze, prevDec.freeze, 'freeze'); check("Coll", dec.coll, prevDec.coll, 'num');
         }
+        
         let finalLabel = "Steady State";
-        if(labelChanges.length > 0) finalLabel = labelChanges.slice(0, 2).join(" | ");
+        if (team.is_zombie && gameState.round > 1) finalLabel = "⚠️ LENDING FROZEN";
+        else if (labelChanges.length > 0) finalLabel = labelChanges.slice(0, 2).join(" | ");
         
         team.history_log.unshift({
             round: gameState.round, scenario: gameState.scenario,
@@ -266,23 +295,23 @@ function calculateFinalScores() {
         let good = "You survived the cycle.";
         let bad = "But you merely existed, you didn't lead.";
 
-        if (score > 28) {
+        if (score > 28 && !team.is_zombie) {
             title = "THE GRANDMASTER"; color = "#00ff9d";
             good = "Surgical precision. Perfect timing.";
             bad = "Honestly? Nothing. You made the rest of us look bad.";
+        } else if (team.is_zombie) {
+            title = "THE ZOMBIE BANK"; color = "#ff0055";
+            good = "You kept the lights on (barely).";
+            bad = "Stockholder value was wiped out. You spent years in 'Regulatory Freeze'.";
         } else if (avgRoe > 18 && raroc < 15) {
             title = "THE ADRENALINE JUNKIE"; color = "#ffaa00";
             good = "You generated massive revenue.";
-            bad = "But you kept triggering Capital Calls. Shareholders were diluted.";
+            bad = "But risk-adjusted returns were poor. You got lucky.";
         } else if (avgRoe < 12 && team.capital_ratio > 15) {
             title = "THE VAULT KEEPER"; color = "#00f3ff";
             good = "Your balance sheet is bulletproof.";
             bad = "Shareholders fell asleep. You missed the growth bus completely.";
-        } else if (score < 10) {
-            title = "THE INSOLVENCY ARTIST"; color = "#ff0055";
-            good = "You provided a great case study on failure.";
-            bad = "Constant recapitalization destroyed all shareholder value.";
-        }
+        } 
 
         team.final_score = Math.round(score * 10) / 10;
         team.archetype = { title, color };
@@ -290,7 +319,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v19.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v21.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -432,9 +461,9 @@ const frontendCode = `
                     <div class="control-scroll-area">
                         <div class="control-row">
                             <div style="display:flex; justify-content:space-between;"><label>1. ACQUISITION VOLUME</label><span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span></div>
-                            <input type="range" id="i-vol" min="1" max="5" value="3" oninput="updContext()">
+                            <input type="range" id="i-vol" min="1" max="5" value="3" step="0.5" oninput="updContext('i-vol', 'ctx-vol')">
                             <button class="sens-btn" onclick="toggleSens('sens-vol')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.3%</span></div></div>
+                            <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">Linear Scale</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">Linear Scale</span></div></div>
                         </div>
                         <div class="control-row">
                             <label>2. INITIAL LINE ASSIGNMENT</label>
@@ -447,16 +476,16 @@ const frontendCode = `
                             <div id="sens-line" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>3. UPSELL AGGRESSION</label>
-                            <input type="range" id="i-cli" min="1" max="5" value="3" oninput="updContext()">
+                            <div style="display:flex; justify-content:space-between;"><label>3. UPSELL AGGRESSION</label><span id="ctx-cli" style="color:var(--blue); font-size:0.8em;">3.0</span></div>
+                            <input type="range" id="i-cli" min="1" max="5" value="3" step="0.5" oninput="updContext('i-cli', 'ctx-cli')">
                             <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
                             <div id="sens-cli" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>4. BALANCE TRANSFER PUSH</label>
-                            <input type="range" id="i-bt" min="1" max="5" value="1" oninput="updContext()">
+                            <div style="display:flex; justify-content:space-between;"><label>4. BALANCE TRANSFER PUSH</label><span id="ctx-bt" style="color:var(--blue); font-size:0.8em;">1.0</span></div>
+                            <input type="range" id="i-bt" min="1" max="5" value="1" step="0.5" oninput="updContext('i-bt', 'ctx-bt')">
                             <button class="sens-btn" onclick="toggleSens('sens-bt')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Churn Risk <span class="sens-val neg">High</span></div></div>
+                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Yield Impact <span class="sens-val neg">-0.3% / pt</span></div></div>
                         </div>
                         <div class="control-row">
                             <label>5. PORTFOLIO ACTIONS</label>
@@ -469,10 +498,10 @@ const frontendCode = `
                             <div id="sens-frz" class="sens-panel"><div class="sens-item">Return Impact <span class="sens-val neg">-5.0%</span></div><div class="sens-item">Loss Reduction <span class="sens-val">+0.5%</span></div></div>
                         </div>
                         <div class="control-row">
-                            <label>6. COLLECTIONS INTENSITY</label>
-                            <input type="range" id="i-coll" min="1" max="5" value="3" oninput="updContext()">
+                            <div style="display:flex; justify-content:space-between;"><label>6. COLLECTIONS INTENSITY</label><span id="ctx-coll" style="color:var(--blue); font-size:0.8em;">3.0</span></div>
+                            <input type="range" id="i-coll" min="1" max="5" value="3" step="0.5" oninput="updContext('i-coll', 'ctx-coll')">
                             <button class="sens-btn" onclick="toggleSens('sens-coll')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.2%</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3%</span></div></div>
+                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.15% / pt</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.2% / pt</span></div></div>
                         </div>
                     </div>
                     <button id="sub-btn" class="main-btn" onclick="submit()" disabled>WAITING FOR MARKET...</button>
@@ -541,13 +570,16 @@ const frontendCode = `
             event.target.classList.add('selected');
             if(grp === 'grp-line') decisions.line = val;
             if(grp === 'grp-frz') decisions.freeze = val;
-            updContext();
+            // No context update needed for buttons as visual feedback is instant
         }
         function toggleSens(id) { document.getElementById(id).classList.toggle('open'); }
-        function updContext() {
-            const v = document.getElementById('i-vol').value;
-            document.getElementById('ctx-vol').innerText = v==1?"Low Risk": (v==5?"High Risk":"Balanced");
+        
+        // Updated Context Function for Sliders
+        function updContext(id, labelId) {
+            const v = document.getElementById(id).value;
+            document.getElementById(labelId).innerText = v;
         }
+
         function submit() {
             const data = {
                 vol: document.getElementById('i-vol').value,
