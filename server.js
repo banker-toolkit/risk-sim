@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v22.0 - NEW GAME PROTOCOL
- * - Fix: Added "Hard Reset" capability to wipe server state.
- * - Logic: "Zombie Protocol" & "Analog Math" retained.
- * - Feature: Resetting kicks all players back to Login screen.
+ * CREDIT CARD RISK SIMULATION v22.1 - AMPLIFIED MATH
+ * - Fix: Re-tuned math coefficients to make sliders impactful again.
+ * - Logic: Steeper curves for OpEx, Yield, and Risk.
+ * - Feature: Hard Reset & Zombie Protocol retained.
  * - Theme: Captain's Room.
  * - Port: 3000
  */
@@ -105,17 +105,16 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_action', (action) => {
-        // --- NEW: RESET GAME LOGIC ---
         if (action.type === 'RESET_GAME') {
             gameState.round = 0;
             gameState.scenario = 'A';
             gameState.status = 'LOBBY';
-            gameState.teams = {}; // Wipe all teams
+            gameState.teams = {}; 
             gameState.news_feed = ["SYSTEM: Waiting for market open..."];
             gameState.cro_data = { vital: "-", cof: "-", liq: "-" };
             
             io.emit('state_update', gameState);
-            io.emit('reload_client'); // Force refresh all browsers
+            io.emit('reload_client'); 
             return;
         }
 
@@ -166,7 +165,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE ---
+// --- 3. MATH ENGINE (AMPLIFIED) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -178,26 +177,35 @@ function runSimulationEngine() {
             dec.line = 'Conservative'; 
         }
 
-        let volMult = 1 + ((dec.vol - 3) * 0.08); 
-        let lineRisk = 1.0; let ecFactor = 1.0; 
-        if(dec.line==='Conservative') { lineRisk=0.85; volMult-=0.04; ecFactor=0.9; } 
-        if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; }
+        // --- AMPLIFIED INPUTS ---
         
-        let cliBal = 1 + ((dec.cli - 1) * 0.03); 
-        let cliRisk = 1 + ((dec.cli - 1) * 0.07);
-        let btBal = 1 + ((dec.bt - 1) * 0.04);
+        // 1. VOLUME: Steeper curve.
+        // Vol 3 = 1.0x, Vol 5 = 1.25x (Was 1.16)
+        let volMult = 1 + ((dec.vol - 3) * 0.125); 
+        
+        let lineRisk = 1.0; let ecFactor = 1.0; 
+        if(dec.line==='Conservative') { lineRisk=0.80; volMult-=0.05; ecFactor=0.85; } 
+        if(dec.line==='Aggressive') { lineRisk=1.4; volMult+=0.10; ecFactor=1.5; }
+        
+        // 2. CLI/BT: Stronger Scaling
+        let cliBal = 1 + ((dec.cli - 1) * 0.04); 
+        let cliRisk = 1 + ((dec.cli - 1) * 0.09); // Higher Upsell Risk
+        let btBal = 1 + ((dec.bt - 1) * 0.06); // Stronger BT Growth
         
         let freezeImpact = 1.0; 
         if(dec.freeze==='Selective') freezeImpact=0.97; 
         if(dec.freeze==='Reactive') freezeImpact=0.92;
         
-        let collBenefit = dec.coll * 0.15; 
+        let collBenefit = dec.coll * 0.20; // Stronger Collections Benefit (was 0.15)
         
         const growth = volMult * cliBal * btBal * freezeImpact;
         const macro = sc.id === 'C' ? 0.92 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        const baseRisk = (dec.vol * 0.6) + (cliRisk * 0.4);
+        // 3. RISK: Exponential Curve for High Volume
+        const volRisk = dec.vol > 4 ? (dec.vol * 0.8) : (dec.vol * 0.6);
+        const baseRisk = volRisk + (cliRisk * 0.4);
+        
         const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
         const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
         team.risk_history.push(currentRiskIndex);
@@ -207,10 +215,20 @@ function runSimulationEngine() {
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        let grossYield = 0.18 - (dec.bt * 0.003); 
+        // 4. P&L (AMPLIFIED SENSITIVITY)
+        
+        // Yield: 18% base.
+        // BT Penalty: -0.6% per point (Was 0.3%). Max BT kills Yield by 3%.
+        let grossYield = 0.18 - (dec.bt * 0.006); 
+
         let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        let opExRate = 0.05 - (dec.vol * 0.005); 
-        opExRate += (dec.coll * 0.002);
+        
+        // OpEx: Steep Efficiency Curve.
+        // Vol 1 = 6.0%. Vol 5 = 2.0%. (1% per point).
+        let opExRate = 0.07 - (dec.vol * 0.01); 
+        
+        // Coll Cost: 0.3% per point (Was 0.2%).
+        opExRate += (dec.coll * 0.003);
 
         const grossRevenue = team.receivables * grossYield;
         const intExp = team.receivables * cof;
@@ -225,7 +243,9 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
         else team.capital_ratio += 0.2; 
 
+        // 5. ZOMBIE PROTOCOL
         let finalEquity = team.receivables * (team.capital_ratio / 100);
+        
         if (team.capital_ratio < 10.0) {
             const requiredEquity = team.receivables * 0.10;
             const deficit = requiredEquity - finalEquity;
@@ -314,7 +334,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v22.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v22.1 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -482,7 +502,7 @@ const frontendCode = `
                             <div style="display:flex; justify-content:space-between;"><label>4. BALANCE TRANSFER PUSH</label><span id="ctx-bt" style="color:var(--blue); font-size:0.8em;">1.0</span></div>
                             <input type="range" id="i-bt" min="1" max="5" value="1" step="0.5" oninput="updContext('i-bt', 'ctx-bt')">
                             <button class="sens-btn" onclick="toggleSens('sens-bt')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Yield Impact <span class="sens-val neg">-0.3% / pt</span></div></div>
+                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Yield Impact <span class="sens-val neg">-0.6% / pt</span></div></div>
                         </div>
                         <div class="control-row">
                             <label>5. PORTFOLIO ACTIONS</label>
@@ -498,7 +518,7 @@ const frontendCode = `
                             <div style="display:flex; justify-content:space-between;"><label>6. COLLECTIONS INTENSITY</label><span id="ctx-coll" style="color:var(--blue); font-size:0.8em;">3.0</span></div>
                             <input type="range" id="i-coll" min="1" max="5" value="3" step="0.5" oninput="updContext('i-coll', 'ctx-coll')">
                             <button class="sens-btn" onclick="toggleSens('sens-coll')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.15% / pt</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.2% / pt</span></div></div>
+                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.2% / pt</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3% / pt</span></div></div>
                         </div>
                     </div>
                     <button id="sub-btn" class="main-btn" onclick="submit()" disabled>WAITING FOR MARKET...</button>
@@ -724,7 +744,7 @@ const frontendCode = `
             if(document.getElementById('admin-ui').classList.contains('active')) updAdmin(s);
         });
         
-        socket.on('reload_client', () => { location.reload(); }); // NEW: Force reload on reset
+        socket.on('reload_client', () => { location.reload(); });
 
         socket.on('team_data_update', (msg) => {
             if(msg.name === myTeam) { teamDataRef = msg.data; updTeam(msg.data, null); }
