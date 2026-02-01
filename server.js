@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v21.0 - ANALOG MATH
- * - Feature: Sliders now support 0.5 increments.
- * - Math: All Logic converted from "Steps" to "Linear Curves" (Smoothed).
- * - Logic: Zombie Protocol & Solvency Logic retained.
+ * CREDIT CARD RISK SIMULATION v22.0 - NEW GAME PROTOCOL
+ * - Fix: Added "Hard Reset" capability to wipe server state.
+ * - Logic: "Zombie Protocol" & "Analog Math" retained.
+ * - Feature: Resetting kicks all players back to Login screen.
  * - Theme: Captain's Room.
  * - Port: 3000
  */
@@ -105,6 +105,20 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_action', (action) => {
+        // --- NEW: RESET GAME LOGIC ---
+        if (action.type === 'RESET_GAME') {
+            gameState.round = 0;
+            gameState.scenario = 'A';
+            gameState.status = 'LOBBY';
+            gameState.teams = {}; // Wipe all teams
+            gameState.news_feed = ["SYSTEM: Waiting for market open..."];
+            gameState.cro_data = { vital: "-", cof: "-", liq: "-" };
+            
+            io.emit('state_update', gameState);
+            io.emit('reload_client'); // Force refresh all browsers
+            return;
+        }
+
         if (action.type === 'START_ROUND') {
             if (gameState.status === 'ENDGAME') return; 
             if (gameState.round >= 9) {
@@ -152,28 +166,23 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (ANALOG CURVES) ---
+// --- 3. MATH ENGINE ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
         const dec = team.decisions[gameState.round] || { vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3 };
 
-        // 0. ZOMBIE PROTOCOL
         if (team.is_zombie) {
             dec.vol = 1; 
             dec.line = 'Conservative'; 
         }
 
-        // 1. ANALOG INPUTS (Linear Curves)
-        // Vol: Linear Growth Multiplier
         let volMult = 1 + ((dec.vol - 3) * 0.08); 
-        
         let lineRisk = 1.0; let ecFactor = 1.0; 
         if(dec.line==='Conservative') { lineRisk=0.85; volMult-=0.04; ecFactor=0.9; } 
         if(dec.line==='Aggressive') { lineRisk=1.3; volMult+=0.08; ecFactor=1.4; }
         
-        // CLI & BT: Linear Scaling
         let cliBal = 1 + ((dec.cli - 1) * 0.03); 
         let cliRisk = 1 + ((dec.cli - 1) * 0.07);
         let btBal = 1 + ((dec.bt - 1) * 0.04);
@@ -182,7 +191,6 @@ function runSimulationEngine() {
         if(dec.freeze==='Selective') freezeImpact=0.97; 
         if(dec.freeze==='Reactive') freezeImpact=0.92;
         
-        // Coll: Linear Benefit (0.15% per point)
         let collBenefit = dec.coll * 0.15; 
         
         const growth = volMult * cliBal * btBal * freezeImpact;
@@ -199,20 +207,9 @@ function runSimulationEngine() {
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // 2. P&L (ANALOG COSTS)
-        
-        // Yield Dilution Curve: 18% base, drops by 0.3% for every BT point
-        // Low BT(1)=17.7%, High BT(5)=16.5%
         let grossYield = 0.18 - (dec.bt * 0.003); 
-
         let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        
-        // OpEx Curve: Linear Drop based on Volume (Efficiency)
-        // Vol 1 = 4.5%, Vol 5 = 2.5%.  Formula: 5.0% - (0.5% * Vol)
         let opExRate = 0.05 - (dec.vol * 0.005); 
-        
-        // Collection Cost Curve: Linear Cost Increase
-        // Coll 1 = 0.2%, Coll 5 = 1.0%. Formula: 0.2% * Coll
         opExRate += (dec.coll * 0.002);
 
         const grossRevenue = team.receivables * grossYield;
@@ -228,9 +225,7 @@ function runSimulationEngine() {
         if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
         else team.capital_ratio += 0.2; 
 
-        // 3. ZOMBIE PROTOCOL
         let finalEquity = team.receivables * (team.capital_ratio / 100);
-        
         if (team.capital_ratio < 10.0) {
             const requiredEquity = team.receivables * 0.10;
             const deficit = requiredEquity - finalEquity;
@@ -319,7 +314,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v21.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v22.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -431,6 +426,8 @@ const frontendCode = `
                 <h2 style="color:white; margin:0;">FACILITATOR COMMAND</h2>
                 <div>
                     <span id="adm-rd" style="font-size:2em; margin-right:20px; font-weight:bold; color:var(--amber)">LOBBY</span>
+                    <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="padding:10px 20px; background:#333; color:white; border:1px solid #666; cursor:pointer; font-weight:bold; margin-right:10px;">HARD RESET</button>
+                    
                     <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer; font-weight:bold;">START ROUND</button>
                     <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="padding:10px 20px; background:orange; color:white; border:none; cursor:pointer; font-weight:bold;">TRANSMIT CEO ORDERS</button>
                     <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
@@ -549,7 +546,7 @@ const frontendCode = `
         <div class="score-card">
             <h1 style="color:var(--amber); font-size:3em; margin:0;">SIMULATION COMPLETE</h1>
             <div id="final-scores" style="text-align:left; margin-top:30px;"></div>
-            <button onclick="location.reload()" style="margin-top:30px; padding:10px; background:#333; color:white; border:none; cursor:pointer;">RESET SYSTEM</button>
+            <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="margin-top:30px; padding:10px; background:#333; color:white; border:none; cursor:pointer;">RESET SYSTEM</button>
         </div>
     </div>
 
@@ -570,16 +567,12 @@ const frontendCode = `
             event.target.classList.add('selected');
             if(grp === 'grp-line') decisions.line = val;
             if(grp === 'grp-frz') decisions.freeze = val;
-            // No context update needed for buttons as visual feedback is instant
         }
         function toggleSens(id) { document.getElementById(id).classList.toggle('open'); }
-        
-        // Updated Context Function for Sliders
         function updContext(id, labelId) {
             const v = document.getElementById(id).value;
             document.getElementById(labelId).innerText = v;
         }
-
         function submit() {
             const data = {
                 vol: document.getElementById('i-vol').value,
@@ -730,6 +723,9 @@ const frontendCode = `
             }
             if(document.getElementById('admin-ui').classList.contains('active')) updAdmin(s);
         });
+        
+        socket.on('reload_client', () => { location.reload(); }); // NEW: Force reload on reset
+
         socket.on('team_data_update', (msg) => {
             if(msg.name === myTeam) { teamDataRef = msg.data; updTeam(msg.data, null); }
         });
