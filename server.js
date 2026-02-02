@@ -1,8 +1,10 @@
 /**
- * CREDIT CARD RISK SIMULATION v22.2 - FAIR PLAY
- * - Math Fix: Reduced Provisioning impact in Crash (prevents double-counting).
- * - Math Fix: Added Capital Dilution (Growth lowers ratio).
- * - Tuning: "Sensible Strategy" now scores ~20-22.
+ * CREDIT CARD RISK SIMULATION v23.0 - RWA EDITION
+ * - Feature: Split Portfolio (Prime vs Sub-Prime Balances).
+ * - Feature: RWA (Risk Weighted Asset) Logic. Sub-Prime costs 3x more Capital than Prime.
+ * - Feature: Line Strategy (Reactive vs Proactive) drives Utilization & RWA.
+ * - Deleted: Collections Slider.
+ * - Math: Solvency Floor 9.0%.
  * - Theme: Captain's Room.
  * - Port: 3000
  */
@@ -18,48 +20,39 @@ const ADMIN_PASSWORD = "admin";
 // --- 1. DATABASES ---
 
 const CEO_SCRIPTS = {
-    1: "Welcome to Q1. I promised the Street a 'transformational' year. My reputation—and my stock options—are riding on this growth narrative. I don't want to hear about 'risk appetite' or 'prudence.' I want to see market share being stolen. If we miss the volume targets, I will find a management team that can hit them. Get aggressive.",
-    2: "The stock is up 5% because *I* convinced the analysts we're a growth machine. Don't screw this up for me. Risk is complaining about 'quality,' but they always complain. I want you to double down. If we slow down now, the Board will ask questions I don't want to answer. Push the line assignments. Make the numbers look good.",
-    3: "I just saw the numbers from BigBank Corp. Their CEO is bragging about their balance transfer volume in the FT. I will not be outmaneuvered by that amateur. Go aggressive on BTs. I don't care if the margins are thin; I want the headline number to look massive for the shareholder letter. Feed the ego, feed the stock price.",
-    4: "Okay, listen. I'm seeing some ugly inflation numbers. If this goes south, I need to know who to blame. Keep growing—we need the revenue to cover up any cracks—but start tightening the back-end criteria silently. If NPLs spike, I’m going to tell the Board it was 'execution error' at the desk level. Don't let that be you.",
-    5: "Why are the provision numbers creeping up? I explicitly told you to manage quality *while* growing! It feels like you aren't listening to my strategy. Fix the collections efficiency. If we miss the EPS target by a cent, I'm clawing back your bonuses to save face with the investors. Fix it, or I'm bringing in consultants.",
-    6: "The stock took a hit this morning. The Board is getting nervous, but they still want their dividend. We cannot afford a capital raise right now—it would dilute *my* holdings. Your mandate is simple: Maintain profitability to protect the share price. If you have to burn OpEx to chase collections, do it. Just don't let the delinquencies spike before my earnings call.",
-    7: "EMERGENCY MEETING. The market is crashing. Who modeled this stress test? Obviously, *your* models were wrong. I'm telling the Board this is a 'systemic event' nobody could foresee, but internally, I know you let the credit quality slip. Freeze everything. If we breach regulatory minimums, the Feds will step in, and I am not going to jail for your incompetence.",
-    8: "I'm fighting for my life in these Board meetings. They are looking for a fall guy. Don't give them a reason to look at this desk. Cut the customers off. I don't care about 'brand damage'—I care about solvency. Hoard cash. Make the balance sheet look bulletproof so I can survive the AGM next month.",
-    9: "We might survive this, barely. If we do, it's because of my steady hand at the wheel. If we don't, well, I've noted who pushed for volume back in Q1. Clear the bad debt off the books so we can start fresh next year. Don't expect bonuses; be grateful you have a badge to swipe tomorrow."
+    1: "Welcome to Q1. The Board wants 'Efficient Growth.' That means high ROE. The Sub-Prime book yields 24%—that's where the money is. I want you to ramp up the 'High Yield' acquisition engine. Don't worry about capital charges yet; we have plenty of buffer.",
+    2: "Revenue is looking good, but our loan utilization is too low. We have too many customers sitting on empty credit lines. Switch to a 'Proactive' Line Strategy. Push the limits. Make them spend.",
+    3: "Analysts are asking about our Asset Mix. They say we look too heavy on the risky side. Ignore them. As long as the economy holds, that Sub-Prime book is a gold mine. Keep the pedal down.",
+    4: "Inflation is ticking up. I'm seeing early stress in the Sub-Prime vintage. I'm not saying stop, but... maybe start layering in some Prime volume to dilute the risk? Just don't kill the yield.",
+    5: "Okay, the RWA (Risk Weighted Assets) number is getting ugly. We are burning capital too fast. Every dollar of Sub-Prime you book is eating 3x the capital of a Prime dollar. You need to balance the mix before we hit the regulatory floor.",
+    6: "Market turns are unpredictable. If we enter a recession with a Sub-Prime heavy book and Proactive lines, we are dead. The 'Unused Exposure' will kill us. Consider switching the Line Strategy to Reactive to save capital.",
+    7: "CRASH. UNEMPLOYMENT 8%. The Sub-Prime book is melting down. Losses are skyrocketing. If you have Prime assets, they might save us. If you are 100% Sub-Prime... well, it was nice knowing you.",
+    8: "Capital Preservation Mode. We are fighting for solvency. Stop booking high-RWA assets immediately. Only book Prime if you must. We need to shrink the denominator (RWA) to survive.",
+    9: "We are crawling out of the wreckage. Look at the survivors. The ones who balanced their RWA are buying the ones who chased yield. Let's see which one you are."
 };
 
 const NEWS_DB = {
-    'A': [ "BBG: Consumer confidence hits 5-year high", "CNBC: Tech sector hiring spree continues", "WSJ: Retail sales beat expectations" ],
-    'B': [ "BBG: Inflation ticks up to 4.2%", "CNBC: Credit card roll-rates deteriorate", "FT: Bond yield curve flattens" ],
-    'C': [ "ALERT: MARKET CRASH - S&P 500 PLUNGES 15%", "BBG: Liquidity freeze in inter-bank markets", "WSJ: Unemployment spikes to 7.5%" ]
-};
-
-const CRO_INTEL_DB = {
-    1: { vital: "Vintage Analysis: Clean.", cof: "Swap Curve: Flat/Stable.", liq: "Excess Capital Deployment Rec." },
-    2: { vital: "FICO Bands: 700+ strong.", cof: "Spreads: Tight (Cheap).", liq: "Buffer: Healthy." },
-    3: { vital: "Early Warning: 30DPD uptick in sub-prime.", cof: "Treasury: 2Y Yields creeping +10bps.", liq: "Inter-bank: Slight tightening." },
-    4: { vital: "Forecast: Payment shock risk if rates rise.", cof: "Market Pricing: +50bps hike likely.", liq: "Stress Test: Margins thinning." },
-    5: { vital: "Roll-Rates: 30->60 bucket accelerating.", cof: "Margin Squeeze: Liability costs rising.", liq: "Rec: Preserve Capital." },
-    6: { vital: "Vintage Decay: Recent books performing poorly.", cof: "Wholesale Funding: Expensive.", liq: "ALM Mismatch: High Risk." },
-    7: { vital: "Shock Model: Predicting 8% NPLs.", cof: "Credit Freeze: New debt prohibitive.", liq: "CRITICAL: Protect Tier 1 Ratio." },
-    8: { vital: "Write-offs: Accelerating.", cof: "External Markets: Closed.", liq: "Insolvency Risk: High." },
-    9: { vital: "Stabilization: Toxic debt clearing?", cof: "Fed Intervention: Rates flooring.", liq: "Position: Fragile but surviving." }
+    'A': [ "BBG: Investors hungry for High-Yield asset backed securities", "CNBC: Consumer spending robust across all segments", "WSJ: Regulatory capital requirements stable" ],
+    'B': [ "BBG: Regulators eyeing 'Unused Credit Lines' risk", "CNBC: Sub-prime delinquencies tick up", "FT: Tier 1 Capital ratios under pressure" ],
+    'C': [ "ALERT: RECESSION - RISK WEIGHTS SPIKE", "BBG: Banks scramble to raise equity", "WSJ: Sub-prime sector faces liquidity freeze" ]
 };
 
 const SCENARIOS = {
-    'A': { id: 'A', name: 'Expansion', severity: 0.8, tail_weight: 0.3 },
-    'B': { id: 'B', name: 'Late Cycle', severity: 1.2, tail_weight: 0.8 }, 
-    'C': { id: 'C', name: 'Shock', severity: 2.2, tail_weight: 1.5 } 
+    'A': { id: 'A', name: 'Expansion', severity: 0.8 },
+    'B': { id: 'B', name: 'Late Cycle', severity: 1.2 }, 
+    'C': { id: 'C', name: 'Shock', severity: 2.2 } 
 };
 
+// Initial State now tracks TWO portfolios
 const INITIAL_TEAM_STATE = {
-    receivables: 1000, 
-    capital_ratio: 14.0, 
+    prime_bal: 700,         // Safe, Low Yield
+    sub_bal: 300,           // Risky, High Yield
+    receivables: 1000,      // Total
+    rwa: 1275,              // Risk Weighted Assets (700*0.75 + 300*2.5)
+    capital_ratio: 14.0,    // Equity / RWA
     roe: 12.0,
-    loss_rate: 2.5,
-    provisions: 2.5, 
-    risk_history: [2.5], 
+    loss_rate: 2.0,
+    provisions: 2.0,
     decisions: {}, 
     history_log: [],
     cumulative_profit: 0,
@@ -111,7 +104,6 @@ io.on('connection', (socket) => {
             gameState.status = 'LOBBY';
             gameState.teams = {}; 
             gameState.news_feed = ["SYSTEM: Waiting for market open..."];
-            gameState.cro_data = { vital: "-", cof: "-", liq: "-" };
             
             io.emit('state_update', gameState);
             io.emit('reload_client'); 
@@ -134,7 +126,12 @@ io.on('connection', (socket) => {
             else gameState.scenario = 'C';
 
             gameState.news_feed = NEWS_DB[gameState.scenario].sort(() => 0.5 - Math.random()).slice(0, 3);
-            gameState.cro_data = CRO_INTEL_DB[gameState.round] || { vital: "No Data", cof: "No Data", liq: "No Data" };
+            
+            // INTELLIGENCE
+            let intel = { vital: "Stable", cof: "Low", liq: "High" };
+            if (gameState.round > 3) intel = { vital: "Sub-Prime Stress", cof: "Rising", liq: "Tightening" };
+            if (gameState.round > 6) intel = { vital: "CRASH", cof: "Spiking", liq: "FROZEN" };
+            gameState.cro_data = intel;
             
             io.emit('state_update', gameState);
         }
@@ -165,128 +162,156 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (CALIBRATED) ---
+// --- 3. MATH ENGINE (RWA EDITION) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
-        const dec = team.decisions[gameState.round] || { vol: 3, line: 'Balanced', cli: 3, bt: 1, freeze: 'None', coll: 3 };
+        const dec = team.decisions[gameState.round] || { vol_p: 3, vol_s: 1, line: 'Reactive', bt: 1, freeze: 'None' };
 
         if (team.is_zombie) {
-            dec.vol = 1; 
-            dec.line = 'Conservative'; 
+            dec.vol_p = 1; dec.vol_s = 0; dec.line = 'Reactive';
         }
 
-        // 1. ANALOG INPUTS
-        let volMult = 1 + ((dec.vol - 3) * 0.125); 
-        
-        let lineRisk = 1.0; let ecFactor = 1.0; 
-        if(dec.line==='Conservative') { lineRisk=0.80; volMult-=0.05; ecFactor=0.85; } 
-        if(dec.line==='Aggressive') { lineRisk=1.4; volMult+=0.10; ecFactor=1.5; }
-        
-        let cliBal = 1 + ((dec.cli - 1) * 0.04); 
-        let cliRisk = 1 + ((dec.cli - 1) * 0.09);
-        let btBal = 1 + ((dec.bt - 1) * 0.06);
-        
-        let freezeImpact = 1.0; 
-        if(dec.freeze==='Selective') freezeImpact=0.97; 
-        if(dec.freeze==='Reactive') freezeImpact=0.92;
-        
-        let collBenefit = dec.coll * 0.20; 
-        
-        const growth = volMult * cliBal * btBal * freezeImpact;
-        const macro = sc.id === 'C' ? 0.92 : 1.04; 
-        team.receivables = team.receivables * growth * macro;
+        // 1. RUNOFF (Existing books decay)
+        team.prime_bal *= 0.90; 
+        team.sub_bal *= 0.88;   // Sub-prime churns faster
 
-        const volRisk = dec.vol > 4 ? (dec.vol * 0.8) : (dec.vol * 0.6);
-        const baseRisk = volRisk + (cliRisk * 0.4);
-        
-        const tailRisk = (lineRisk * 1.8) + (dec.cli * 0.3);
-        const currentRiskIndex = (0.3 * baseRisk) + (sc.tail_weight * tailRisk);
-        team.risk_history.push(currentRiskIndex);
+        // 2. NEW BOOKINGS (Based on Sliders)
+        // Prime: Volume 1-5 => 20cr to 100cr
+        const new_prime = dec.vol_p * 25 * (sc.id==='C'?0.5:1.0);
+        // Sub: Volume 1-5 => 20cr to 100cr
+        const new_sub = dec.vol_s * 25 * (sc.id==='C'?0.3:1.0); // Harder to find subprime in crash
 
-        const lagIndex = team.risk_history.length - 2; 
-        const histRisk = team.risk_history[Math.max(0, lagIndex)];
-        let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
-        team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
-        
-        // 2. P&L (FAIR PLAY CALIBRATION)
-        let grossYield = 0.18 - (dec.bt * 0.006); 
-        let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        let opExRate = 0.07 - (dec.vol * 0.01); 
-        opExRate += (dec.coll * 0.003);
+        team.prime_bal += new_prime;
+        team.sub_bal += new_sub;
 
-        const grossRevenue = team.receivables * grossYield;
-        const intExp = team.receivables * cof;
-        const opExp = team.receivables * opExRate;
-        const creditCost = team.receivables * (team.loss_rate/100);
-        
-        // FIX: Provisioning Cap in Crisis.
-        // In Scenario C, we shouldn't provision full forward risk if we are already taking massive losses.
-        let provMultiplier = sc.id === 'C' ? 0.9 : 0.8; // Lowered from 1.5 in C
-        team.provisions = currentRiskIndex * provMultiplier;
-        const provCost = team.receivables * (team.provisions/100);
+        // 3. LINE STRATEGY IMPACT (Utilization & RWA)
+        let utilBoost = 1.0; 
+        let rwaPenalty = 1.0; 
 
-        const profit = grossRevenue - intExp - opExp - creditCost - provCost;
-        
-        // 3. CAPITAL DYNAMICS (NEW REALISM)
-        // Profit adds to ratio, but Growth DILUTES ratio.
-        // Approx: 10% Growth drops ratio by ~1.0%.
-        const growthImpact = (growth - 1.0) * 12.0; // Dilution Factor
-        const profitImpact = (profit / team.receivables) * 100;
-        
-        team.capital_ratio = team.capital_ratio + profitImpact - growthImpact;
+        if (dec.line === 'Proactive') {
+            utilBoost = 1.08;   // +8% Balances (Revenue)
+            rwaPenalty = 1.15;  // +15% RWA (Capital Hit due to Unused Exposure)
+        } else {
+            // Reactive
+            utilBoost = 1.02;   // +2% Balances
+            rwaPenalty = 1.0;   // No Penalty
+        }
 
-        // 4. ZOMBIE PROTOCOL
-        let finalEquity = team.receivables * (team.capital_ratio / 100);
+        team.prime_bal *= utilBoost;
+        team.sub_bal *= utilBoost;
+
+        // FREEZE IMPACT
+        if(dec.freeze !== 'None') {
+            const cut = dec.freeze === 'Reactive' ? 0.90 : 0.95;
+            team.sub_bal *= cut; // Freeze hits Sub-prime hardest
+            team.prime_bal *= 0.98;
+        }
+
+        team.receivables = team.prime_bal + team.sub_bal;
+
+        // 4. CALCULATE RWA (THE KEY METRIC)
+        // Prime Weight: 75%
+        // Sub Weight: 250%
+        const prime_rwa = team.prime_bal * 0.75;
+        const sub_rwa = team.sub_bal * 2.50;
         
-        // Lowered Threshold to 9.0 to allow "Sensible Strategy" survival
+        team.rwa = (prime_rwa + sub_rwa) * rwaPenalty;
+
+        // 5. BLENDED METRICS
+        const mix_prime = team.prime_bal / team.receivables;
+        const mix_sub = team.sub_bal / team.receivables;
+
+        // YIELD
+        // Prime: 8%, Sub: 24%
+        const yield_rate = (mix_prime * 0.08) + (mix_sub * 0.24);
+        
+        // LOSS RATES (Scenario Dependent)
+        let loss_p = 0.01; let loss_s = 0.05;
+        if(sc.id === 'B') { loss_p = 0.015; loss_s = 0.08; }
+        if(sc.id === 'C') { loss_p = 0.025; loss_s = 0.16; } // Crash hits Sub-prime hard
+        
+        // Freeze Benefit
+        if(dec.freeze === 'Selective') loss_s *= 0.85;
+        if(dec.freeze === 'Reactive') loss_s *= 0.70;
+
+        const w_loss = (mix_prime * loss_p) + (mix_sub * loss_s);
+        team.loss_rate = w_loss * 100;
+
+        // 6. P&L
+        const grossRev = team.receivables * yield_rate;
+        const intExp = team.receivables * (sc.id==='A'?0.04 : 0.06);
+        const opEx = team.receivables * 0.025; // Fixed OpEx 2.5%
+        const credCost = team.receivables * w_loss;
+        
+        // Provisions (Forward looking)
+        let prov_factor = sc.id === 'C' ? 0.5 : 1.0; // Don't double count in crash
+        const provCost = credCost * prov_factor; 
+
+        const profit = grossRev - intExp - opEx - credCost - provCost;
+
+        // 7. CAPITAL LOGIC (Equity / RWA)
+        let equity = team.receivables * (team.capital_ratio / 100); // Old Equity
+        // Wait, Capital Ratio is Equity/RWA now. So get old Equity from old RWA?
+        // Let's simplify: Maintain Equity Value.
+        // Recover equity from previous ratio? No, let's track Cumulative Profit.
+        // Re-calculate Equity:
+        // Start Equity was 1000 * 14% = 140. 
+        // We will just accumulate profit into a hidden 'equity_val' tracking var?
+        // To keep it stateless compatible with existing array structure:
+        // We will approximate change.
+        
+        // Better: We need to track actual Equity value to handle the denominator change properly.
+        // Let's reverse engineer for this round:
+        // Current Equity ~= Old RWA * Old Ratio... let's just add profit to "implied equity"
+        // Let's assume current equity is `team.rwa * (team.capital_ratio/100)` BEFORE this round updates? 
+        // No, that's recursive.
+        
+        // FIX: We will estimate Previous Equity = (Previous Receivables * Prev Ratio? No RWA change).
+        // Let's just say: Equity += Profit.
+        // New Ratio = New Equity / New RWA.
+        
+        // We need a stored 'equity' value in the state. I didn't add it to INITIAL_TEAM_STATE.
+        // Hack: We will derive it.
+        // Implied Previous Equity = (team.cumulative_profit + 180); // 180 is starting equity (1275 * 14%)
+        let implied_equity = 180 + team.cumulative_profit; 
+        
+        implied_equity += profit; 
+        
+        // ZOMBIE CHECK (9.0% Floor)
+        team.capital_ratio = (implied_equity / team.rwa) * 100;
+
         if (team.capital_ratio < 9.0) {
-            const requiredEquity = team.receivables * 0.09;
-            const deficit = requiredEquity - finalEquity;
-            finalEquity = finalEquity + (deficit * 1.5); 
-            team.capital_ratio = 9.0; 
-            team.is_zombie = true; 
+            const req_equity = team.rwa * 0.09;
+            const injection = req_equity - implied_equity;
+            // Penalty: Equity dilution
+            // We don't track stock price, so we mark them Zombie.
+            implied_equity += injection; // Bailout
+            team.capital_ratio = 9.0;
+            team.is_zombie = true;
         }
 
-        team.roe = (profit / finalEquity) * 100;
+        team.roe = (profit / implied_equity) * 100;
         team.cumulative_profit += profit;
+        team.cumulative_capital_usage += (team.rwa * 0.12); // Cost of Capital charge
         
-        const riskPenalty = team.is_zombie ? 1.5 : 1.0;
-        const economicCapital = finalEquity * ecFactor * riskPenalty; 
-        team.cumulative_capital_usage += economicCapital;
-        
+        team.provisions = (provCost / team.receivables) * 100;
+
         team.roe_history.push(team.roe);
         const currentRaroc = (team.cumulative_profit / team.cumulative_capital_usage) * 100;
         team.raroc_history.push(currentRaroc);
-        team.rev_history.push(grossRevenue);
+        team.rev_history.push(grossRev);
         team.bal_history.push(team.receivables);
 
-        let labelChanges = [];
-        const prevDec = team.decisions[gameState.round - 1];
-        if(!prevDec) labelChanges.push("Initial Deployment");
-        else {
-            const check = (name, curr, prev, type) => {
-                let c = Number(curr); let p = Number(prev);
-                if(type === 'line') { const s = (l) => l==='Aggressive'?3:(l==='Balanced'?2:1); c=s(curr); p=s(prev); }
-                if(type === 'freeze') { const s = (f) => f==='Reactive'?3:(f==='Selective'?2:1); c=s(curr); p=s(prev); }
-                if(c > p) labelChanges.push(`↑ ${name}`);
-                if(c < p) labelChanges.push(`↓ ${name}`);
-            };
-            check("Vol", dec.vol, prevDec.vol, 'num'); check("Line", dec.line, prevDec.line, 'line');
-            check("Upsell", dec.cli, prevDec.cli, 'num'); check("BT", dec.bt, prevDec.bt, 'num');
-            check("Action", dec.freeze, prevDec.freeze, 'freeze'); check("Coll", dec.coll, prevDec.coll, 'num');
-        }
-        
-        let finalLabel = "Steady State";
-        if (team.is_zombie && gameState.round > 1) finalLabel = "⚠️ LENDING FROZEN";
-        else if (labelChanges.length > 0) finalLabel = labelChanges.slice(0, 2).join(" | ");
+        let finalLabel = `P:${dec.vol_p} | S:${dec.vol_s}`;
+        if (team.is_zombie) finalLabel = "⚠️ ZOMBIE";
         
         team.history_log.unshift({
             round: gameState.round, scenario: gameState.scenario,
             dec_summ: finalLabel,
-            met_summ: `Loss:${team.loss_rate.toFixed(1)}% | Cap:${team.capital_ratio.toFixed(1)}%`,
-            decision: `Vol:${dec.vol}`, impact: `ROE: ${team.roe.toFixed(1)}%`
+            met_summ: `Loss:${team.loss_rate.toFixed(1)}% | RWA:${Math.round(team.rwa)}`,
+            decision: `Strat:${dec.line}`, impact: `Cap:${team.capital_ratio.toFixed(1)}%`
         });
     });
 }
@@ -302,25 +327,21 @@ function calculateFinalScores() {
         
         let title = "THE PASSENGER";
         let color = "#aaa";
-        let good = "You survived the cycle.";
-        let bad = "But you merely existed, you didn't lead.";
+        let good = "You survived.";
+        let bad = "Average performance.";
 
-        if (score > 28 && !team.is_zombie) {
-            title = "THE GRANDMASTER"; color = "#00ff9d";
-            good = "Surgical precision. Perfect timing.";
-            bad = "Honestly? Nothing. You made the rest of us look bad.";
+        if (score > 18 && !team.is_zombie) {
+            title = "THE ARCHITECT"; color = "#00ff9d";
+            good = "Perfect RWA Optimization.";
+            bad = "You mastered the capital equation.";
         } else if (team.is_zombie) {
             title = "THE ZOMBIE BANK"; color = "#ff0055";
-            good = "You kept the lights on (barely).";
-            bad = "Stockholder value was wiped out. You spent years in 'Regulatory Freeze'.";
-        } else if (avgRoe > 18 && raroc < 15) {
-            title = "THE ADRENALINE JUNKIE"; color = "#ffaa00";
-            good = "You generated massive revenue.";
-            bad = "But risk-adjusted returns were poor. You got lucky.";
-        } else if (avgRoe < 12 && team.capital_ratio > 15) {
-            title = "THE VAULT KEEPER"; color = "#00f3ff";
-            good = "Your balance sheet is bulletproof.";
-            bad = "Shareholders fell asleep. You missed the growth bus completely.";
+            good = "You generated revenue.";
+            bad = "But you ignored Capital Consumption (RWA).";
+        } else if (team.capital_ratio > 20) {
+            title = "THE HOARDER"; color = "#00f3ff";
+            good = "Safe.";
+            bad = "Inefficient. You sat on cash.";
         } 
 
         team.final_score = Math.round(score * 10) / 10;
@@ -329,7 +350,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v22.2 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v23.0 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -364,70 +385,38 @@ const frontendCode = `
         .btn-opt { flex: 1; background: #222; color: #666; padding: 8px; cursor: pointer; text-align: center; font-size:0.8em; border:1px solid #333; transition:0.2s; }
         .btn-opt.selected { background: var(--blue); color: #000; font-weight: bold; border-color:var(--blue); box-shadow: 0 0 10px var(--blue); }
         input[type=range] { width: 100%; accent-color: var(--blue); margin-top:5px; cursor:pointer; }
-        .sens-btn { background:none; border:none; color:#666; font-size:0.8em; cursor:pointer; margin-top:5px; }
-        .sens-panel { background:#111; border-top:1px solid #333; padding:10px; margin-top:5px; display:none; grid-template-columns: 1fr 1fr; gap:10px; font-size:0.8em; }
-        .sens-panel.open { display:grid; }
-        .sens-val { color:var(--green); font-weight:bold; float:right; }
-        .sens-val.neg { color:var(--red); }
+        
+        /* New RWA Meter */
+        .rwa-meter { height: 10px; background: #333; width: 100%; margin-top:5px; position:relative; }
+        .rwa-fill { height:100%; background: linear-gradient(90deg, #00ff9d, #ffaa00, #ff0055); width: 0%; transition: 0.5s; }
 
         #mission-control { position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000; background: #050810; display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden; }
         #mission-control.open { display:flex; }
-        .celestial-body { position: absolute; z-index: 1; pointer-events: none; mix-blend-mode: screen; }
-        #milky-way { top: 0; left: 0; width: 100%; height: 100%; background: url('https://images.unsplash.com/photo-1534849144158-97256c645fc3?q=80&w=2000') no-repeat center/cover; opacity: 0.3; z-index:0; position:absolute; }
-        #saturn { bottom: -5%; left: 50%; transform: translateX(-50%) rotate(10deg); width: 700px; height: 500px; background: url('https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg') no-repeat center/contain; opacity: 0.3; z-index: 0; position:absolute; }
-
-        .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
-        .satellite { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%); cursor: pointer; z-index: 20; background:white; }
-        .sat-green { box-shadow: 0 0 15px #00ff9d; animation: pulse-g 3s infinite; }
-        .sat-blue { box-shadow: 0 0 15px #00f3ff; animation: pulse-b 4s infinite reverse; }
         
-        .data-label { position:absolute; transform:translateX(-50%); white-space:nowrap; font-size:0.8em; font-weight:bold; letter-spacing:1px; z-index:15; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 2px 2px 4px black; }
-        .lbl-decision { bottom: 25px; color: #FFD700; }
-        .lbl-metric { top: 25px; color: #00F3FF; }
-        .guide-line { position: absolute; width: 1px; background: rgba(255,255,255,0.4); transform: translateX(-50%); z-index:12; }
-
+        .chart-container { position:relative; flex:1; width:100%; margin-top:20px; z-index:10; }
         #ceo-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 3000; display: none; justify-content: center; align-items: center; flex-direction: column; backdrop-filter: blur(5px); }
         #ceo-overlay.active { display: flex; }
         .transmission-box { width: 70%; max-width: 800px; border: 2px solid var(--red); background: #110505; padding: 40px; box-shadow: 0 0 50px rgba(255, 0, 85, 0.3); text-align: center; position: relative; }
-        .trans-header { color: var(--red); font-size: 1.5em; letter-spacing: 5px; margin-bottom: 20px; font-weight: bold; border-bottom: 1px solid var(--red); padding-bottom: 10px; }
-        .trans-body { color: #fff; font-size: 1.2em; line-height: 1.6; font-family: 'Courier New', monospace; margin-bottom: 30px; text-align: left; }
         .ack-btn { background: var(--red); color: white; border: none; padding: 15px 30px; font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; }
-        .ack-btn:hover { background: #ff3366; }
-
+        
         #lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:10; backdrop-filter:blur(3px); flex-direction:column; }
-        #lock-stamp { border: 5px solid var(--green); color: var(--green); font-size: 2.5em; font-weight: bold; padding: 20px; transform: rotate(-10deg); text-transform: uppercase; letter-spacing: 5px; text-shadow: 0 0 20px var(--green); }
         #endgame-screen { position:absolute; top:0; left:0; width:100%; height:100%; background:black; z-index:999; display:none; flex-direction:column; align-items:center; justify-content:center; overflow-y:auto; padding:20px; }
         .score-card { width: 70%; background: #111; border: 2px solid var(--amber); padding: 40px; text-align: center; }
         button.main-btn { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: var(--blue); font-size: 1.2em; cursor: pointer; font-weight: bold; letter-spacing: 2px; text-transform:uppercase; transition: 0.2s; flex-shrink:0; }
-        button.main-btn:disabled { border-color: #444; color: #555; cursor: not-allowed; }
         .hidden { display:none !important; }
         
-        .cro-box { margin-bottom:15px; border:1px solid #333; padding:10px; background:rgba(0,0,0,0.3); }
-        .cro-row { display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.9em; }
-        .cro-lbl { color:#aaa; }
-        .cro-val { color:var(--blue); font-weight:bold; }
-        
-        .rank-card { background:#1a1a1a; margin-bottom:15px; padding:15px; text-align:left; border-left:5px solid #555; }
-        .rank-title { font-size:1.4em; font-weight:bold; margin-bottom:5px; text-transform:uppercase; }
-        .rank-stats { font-size:0.9em; color:#888; margin-bottom:10px; }
-        .feedback-box { background:#000; padding:10px; border:1px dashed #444; font-size:0.9em; color:#ddd; }
-        .fb-good { color:#00ff9d; margin-bottom:5px; }
-        .fb-bad { color:#ff0055; }
+        .rank-card { background:#1a1a1a; margin-bottom:15px; padding:15px; text-align:left; border-left:5px solid #555; color:#ddd; }
     </style>
 </head>
 <body>
     <div id="ticker-bar">
         <div style="background:#222; color:white; padding:0 10px; height:100%; display:flex; align-items:center; z-index:2; border-right:1px solid #444;">MARKET WIRE</div>
-        <div class="ticker-wrap">
-            <div id="news-feed" class="ticker-move">
-                <div class="ticker-item">SYSTEM CONNECTED... WAITING FOR ROUND 1...</div>
-            </div>
-        </div>
+        <div class="ticker-wrap"><div id="news-feed" class="ticker-move"><div class="ticker-item">...</div></div></div>
     </div>
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 320px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // TERMINAL ACCESS</h2>
+                <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // RWA EDITION</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase; text-align:center;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
                 <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
@@ -436,84 +425,65 @@ const frontendCode = `
                 </div>
             </div>
         </div>
-        <div id="admin-ui" class="screen" style="padding:20px; overflow-y:auto; background:#111;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
-                <h2 style="color:white; margin:0;">FACILITATOR COMMAND</h2>
-                <div>
-                    <span id="adm-rd" style="font-size:2em; margin-right:20px; font-weight:bold; color:var(--amber)">LOBBY</span>
-                    <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="padding:10px 20px; background:#333; color:white; border:1px solid #666; cursor:pointer; font-weight:bold; margin-right:10px;">HARD RESET</button>
-                    
-                    <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer; font-weight:bold;">START ROUND</button>
-                    <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="padding:10px 20px; background:orange; color:white; border:none; cursor:pointer; font-weight:bold;">TRANSMIT CEO ORDERS</button>
-                    <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
-                </div>
-            </div>
-            <div id="adm-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;"></div>
-        </div>
         <div id="team-ui" class="screen" style="background: radial-gradient(circle at center, #1a2c4e 0%, #000 100%);">
             <div style="padding: 10px 20px;">
                 <div id="hud">
                     <div class="glass metric"><div>ROE</div><div id="d-roe" class="val" style="color:var(--green)">0%</div></div>
+                    <div class="glass metric"><div>CAPITAL RATIO</div><div id="d-cap" class="val" style="color:var(--amber)">0%</div></div>
                     <div class="glass metric"><div>LOSS RATE</div><div id="d-loss" class="val" style="color:var(--red)">0%</div></div>
-                    <div class="glass metric"><div>PROVISIONS</div><div id="d-prov" class="val" style="color:var(--amber)">0%</div></div>
-                    <div class="glass metric"><div>CAPITAL</div><div id="d-cap" class="val">0%</div></div>
+                    <div class="glass metric"><div>RWA</div><div id="d-rwa" class="val">0</div></div>
                     <div class="glass metric"><div>RECEIVABLES</div><div id="d-rec" class="val">0</div></div>
                 </div>
             </div>
             <div style="flex:1; display:flex; padding:0 20px 20px 20px; gap:20px; overflow:hidden;">
                 <div class="glass" style="flex:1; position:relative; overflow:hidden;">
                     <div id="lock-overlay" class="hidden">
-                        <div id="lock-stamp">DECISION LOCKED</div>
-                        <div style="color:white; margin-top:20px;">Waiting for Round End...</div>
+                        <div id="lock-stamp">LOCKED</div>
+                        <div style="color:white; margin-top:20px;">Computing RWA...</div>
                     </div>
                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--blue); padding-bottom:10px; margin-bottom:15px; flex-shrink:0;">
-                        <h3 style="margin:0; color:white;">DECISION DECK</h3>
+                        <h3 style="margin:0; color:white;">ASSET GENERATION</h3>
                         <div id="rd-ind" style="color:var(--amber); font-weight:bold;">ROUND 0</div>
                     </div>
                     <div class="control-scroll-area">
                         <div class="control-row">
-                            <div style="display:flex; justify-content:space-between;"><label>1. ACQUISITION VOLUME</label><span id="ctx-vol" style="color:var(--blue); font-size:0.8em;">Balanced</span></div>
-                            <input type="range" id="i-vol" min="1" max="5" value="3" step="0.5" oninput="updContext('i-vol', 'ctx-vol')">
-                            <button class="sens-btn" onclick="toggleSens('sens-vol')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-vol" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">Linear Scale</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">Linear Scale</span></div></div>
-                        </div>
-                        <div class="control-row">
-                            <label>2. INITIAL LINE ASSIGNMENT</label>
-                            <div class="btn-group" id="grp-line">
-                                <div class="btn-opt" onclick="selBtn('grp-line', 'Conservative')">Conservative</div>
-                                <div class="btn-opt selected" onclick="selBtn('grp-line', 'Balanced')">Balanced</div>
-                                <div class="btn-opt" onclick="selBtn('grp-line', 'Aggressive')">Aggressive</div>
+                            <div style="display:flex; justify-content:space-between;">
+                                <label style="color:var(--green)">1. PRIME / SUPER-PRIME BOOKING</label>
+                                <span id="ctx-vp" style="color:var(--green); font-weight:bold;">3.0</span>
                             </div>
-                            <button class="sens-btn" onclick="toggleSens('sens-line')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-line" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+8.0%</span></div><div class="sens-item">Tail Risk <span class="sens-val neg">HIGH</span></div></div>
+                            <div style="font-size:0.8em; color:#888;">Low Yield (8%) | Low Risk | <span style="color:#00ff9d">RWA: 75%</span></div>
+                            <input type="range" id="i-vp" min="0" max="5" value="3" step="0.5" oninput="updContext('i-vp', 'ctx-vp')">
                         </div>
+
                         <div class="control-row">
-                            <div style="display:flex; justify-content:space-between;"><label>3. UPSELL AGGRESSION</label><span id="ctx-cli" style="color:var(--blue); font-size:0.8em;">3.0</span></div>
-                            <input type="range" id="i-cli" min="1" max="5" value="3" step="0.5" oninput="updContext('i-cli', 'ctx-cli')">
-                            <button class="sens-btn" onclick="toggleSens('sens-cli')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-cli" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+3.0%</span></div><div class="sens-item">Prov Impact <span class="sens-val neg">+0.2%</span></div></div>
+                            <div style="display:flex; justify-content:space-between;">
+                                <label style="color:var(--red)">2. SUB-PRIME / HIGH YIELD BOOKING</label>
+                                <span id="ctx-vs" style="color:var(--red); font-weight:bold;">1.0</span>
+                            </div>
+                            <div style="font-size:0.8em; color:#888;">High Yield (24%) | High Risk | <span style="color:#ff0055">RWA: 250%</span></div>
+                            <input type="range" id="i-vs" min="0" max="5" value="1" step="0.5" oninput="updContext('i-vs', 'ctx-vs')">
                         </div>
+
                         <div class="control-row">
-                            <div style="display:flex; justify-content:space-between;"><label>4. BALANCE TRANSFER PUSH</label><span id="ctx-bt" style="color:var(--blue); font-size:0.8em;">1.0</span></div>
-                            <input type="range" id="i-bt" min="1" max="5" value="1" step="0.5" oninput="updContext('i-bt', 'ctx-bt')">
-                            <button class="sens-btn" onclick="toggleSens('sens-bt')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-bt" class="sens-panel"><div class="sens-item">Return Growth <span class="sens-val">+4.0%</span></div><div class="sens-item">Yield Impact <span class="sens-val neg">-0.6% / pt</span></div></div>
+                            <label>3. LINE ASSIGNMENT STRATEGY</label>
+                            <div class="btn-group" id="grp-line">
+                                <div class="btn-opt selected" onclick="selBtn('grp-line', 'Reactive')">REACTIVE</div>
+                                <div class="btn-opt" onclick="selBtn('grp-line', 'Proactive')">PROACTIVE</div>
+                            </div>
+                            <div style="font-size:0.8em; color:#888; margin-top:5px;">
+                                <span id="txt-line">Low RWA Impact. Slow Utilization.</span>
+                            </div>
                         </div>
+
                         <div class="control-row">
-                            <label>5. PORTFOLIO ACTIONS</label>
+                             <div style="display:flex; justify-content:space-between;">
+                                <label>4. PORTFOLIO ACTIONS (FREEZE)</label>
+                            </div>
                             <div class="btn-group" id="grp-frz">
                                 <div class="btn-opt selected" onclick="selBtn('grp-frz', 'None')">None</div>
                                 <div class="btn-opt" onclick="selBtn('grp-frz', 'Selective')">Selective</div>
                                 <div class="btn-opt" onclick="selBtn('grp-frz', 'Reactive')">Reactive</div>
                             </div>
-                            <button class="sens-btn" onclick="toggleSens('sens-frz')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-frz" class="sens-panel"><div class="sens-item">Return Impact <span class="sens-val neg">-5.0%</span></div><div class="sens-item">Loss Reduction <span class="sens-val">+0.5%</span></div></div>
-                        </div>
-                        <div class="control-row">
-                            <div style="display:flex; justify-content:space-between;"><label>6. COLLECTIONS INTENSITY</label><span id="ctx-coll" style="color:var(--blue); font-size:0.8em;">3.0</span></div>
-                            <input type="range" id="i-coll" min="1" max="5" value="3" step="0.5" oninput="updContext('i-coll', 'ctx-coll')">
-                            <button class="sens-btn" onclick="toggleSens('sens-coll')">[?] IMPACT ANALYSIS</button>
-                            <div id="sens-coll" class="sens-panel"><div class="sens-item">Loss Reduction <span class="sens-val">+0.2% / pt</span></div><div class="sens-item">OpEx (Cost) <span class="sens-val neg">+0.3% / pt</span></div></div>
                         </div>
                     </div>
                     <button id="sub-btn" class="main-btn" onclick="submit()" disabled>WAITING FOR MARKET...</button>
@@ -524,35 +494,43 @@ const frontendCode = `
                     
                     <h4 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:5px;">CRO INTELLIGENCE</h4>
                     <div class="cro-box">
-                        <div class="cro-row"><span class="cro-lbl">BUREAU VITALS:</span><span id="cro-vit" class="cro-val">-</span></div>
-                        <div class="cro-row"><span class="cro-lbl">COST OF FUNDS:</span><span id="cro-cof" class="cro-val">-</span></div>
+                        <div class="cro-row"><span class="cro-lbl">MARKET PHASE:</span><span id="cro-vit" class="cro-val">-</span></div>
                         <div class="cro-row"><span class="cro-lbl">LIQUIDITY:</span><span id="cro-liq" class="cro-val">-</span></div>
                     </div>
-
+                    
                     <div style="margin-top:auto;">
                         <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); font-size:1em;">> VIEW MISSION LOG</button>
                     </div>
                 </div>
             </div>
         </div>
+        <div id="admin-ui" class="screen" style="padding:20px; overflow-y:auto; background:#111;">
+             <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
+                <h2 style="color:white; margin:0;">FACILITATOR COMMAND</h2>
+                <div>
+                    <span id="adm-rd" style="font-size:2em; margin-right:20px; font-weight:bold; color:var(--amber)">LOBBY</span>
+                    <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="padding:10px 20px; background:#333; color:white; border:1px solid #666; cursor:pointer; font-weight:bold; margin-right:10px;">HARD RESET</button>
+                    <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer; font-weight:bold;">START ROUND</button>
+                    <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="padding:10px 20px; background:orange; color:white; border:none; cursor:pointer; font-weight:bold;">TRANSMIT CEO ORDERS</button>
+                    <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
+                </div>
+            </div>
+            <div id="adm-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;"></div>
+        </div>
     </div>
     
     <div id="mission-control">
-        <div id="milky-way" class="celestial-body"></div>
-        <div id="saturn" class="celestial-body"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; z-index:10; width:100%;">
-            <h2 style="color:var(--blue); margin:0; text-transform:uppercase; letter-spacing:2px; text-shadow:0 0 10px var(--blue);">Strategic Trajectory</h2>
-            <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE LINK</button>
+            <h2 style="color:var(--blue); margin:0;">STRATEGIC TRAJECTORY</h2>
+            <button onclick="closeMissionLog()" style="background:none; border:1px solid var(--red); color:var(--red); padding:5px 15px; cursor:pointer;">CLOSE</button>
         </div>
-        <div class="chart-container" id="chart-wrapper">
-            <canvas id="missionChart"></canvas>
-        </div>
+        <div class="chart-container"><canvas id="missionChart"></canvas></div>
     </div>
 
     <div id="ceo-overlay">
         <div class="transmission-box">
             <div class="trans-header">INCOMING SECURE TRANSMISSION</div>
-            <div id="trans-text" class="trans-body">DECODING...</div>
+            <div id="trans-text" class="trans-body">...</div>
             <button class="ack-btn" onclick="closeCeo()">ACKNOWLEDGE</button>
         </div>
     </div>
@@ -569,7 +547,7 @@ const frontendCode = `
         const socket = io();
         let myTeam = "";
         let teamDataRef = null;
-        let decisions = { line: 'Balanced', freeze: 'None' };
+        let decisions = { line: 'Reactive', freeze: 'None' };
         let missionChart = null;
 
         function sEmit(ev, data) { socket.emit(ev, data); }
@@ -580,22 +558,21 @@ const frontendCode = `
         function selBtn(grp, val) {
             document.querySelectorAll('#'+grp+' .btn-opt').forEach(b => b.classList.remove('selected'));
             event.target.classList.add('selected');
-            if(grp === 'grp-line') decisions.line = val;
+            if(grp === 'grp-line') {
+                decisions.line = val;
+                document.getElementById('txt-line').innerText = val==='Proactive' ? "High RWA Impact! (+15%). High Utilization." : "Low RWA Impact. Slow Utilization.";
+                document.getElementById('txt-line').style.color = val==='Proactive' ? "#ff0055" : "#888";
+            }
             if(grp === 'grp-frz') decisions.freeze = val;
         }
-        function toggleSens(id) { document.getElementById(id).classList.toggle('open'); }
-        function updContext(id, labelId) {
-            const v = document.getElementById(id).value;
-            document.getElementById(labelId).innerText = v;
-        }
+        function updContext(id, labelId) { document.getElementById(labelId).innerText = document.getElementById(id).value; }
         function submit() {
             const data = {
-                vol: document.getElementById('i-vol').value,
+                vol_p: document.getElementById('i-vp').value,
+                vol_s: document.getElementById('i-vs').value,
                 line: decisions.line,
-                cli: document.getElementById('i-cli').value,
-                bt: document.getElementById('i-bt').value,
                 freeze: decisions.freeze,
-                coll: document.getElementById('i-coll').value
+                bt: 1, cli: 1, coll: 3 // Defaults for now
             };
             sEmit('submit_decision', data);
             document.getElementById('lock-overlay').classList.remove('hidden');
@@ -610,67 +587,24 @@ const frontendCode = `
             const sortedLog = [...teamDataRef.history_log].reverse();
             const roeData = teamDataRef.roe_history;
             const rarocData = teamDataRef.raroc_history;
-            const revData = teamDataRef.rev_history;
-            const balData = teamDataRef.bal_history;
             const rounds = sortedLog.map(l => "R" + l.round);
 
             const ctx = document.getElementById('missionChart').getContext('2d');
             if(missionChart) missionChart.destroy();
-
             missionChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: rounds,
                     datasets: [
-                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: '#00ff9d', type: 'line', yAxisID: 'y', tension: 0.4 },
-                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: '#00f3ff', type: 'line', yAxisID: 'y', tension: 0.4 },
-                        { label: 'Receivables (Cr)', data: balData, backgroundColor: 'rgba(255,255,255,0.1)', yAxisID: 'y1' },
-                        { label: 'Revenue (Cr)', data: revData, backgroundColor: 'rgba(255,215,0,0.2)', yAxisID: 'y1' }
+                        { label: 'ROE %', data: roeData, borderColor: '#00ff9d', backgroundColor: '#00ff9d', type: 'line', yAxisID: 'y' },
+                        { label: 'RAROC %', data: rarocData, borderColor: '#00f3ff', backgroundColor: '#00f3ff', type: 'line', yAxisID: 'y' }
                     ]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    layout: { padding: { left: 80, right: 80, top: 20, bottom: 20 } },
-                    scales: {
-                        y: { type: 'linear', position: 'left', grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#fff' }, title:{display:true, text:'PERCENT %', color:'#aaa'} },
-                        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#ccc' }, title:{display:true, text:'VALUE (Cr)', color:'#aaa'} },
-                        x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#ccc' } }
-                    },
-                    animation: { onComplete: () => { updateSatellites(sortedLog); } }
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { type: 'linear', position: 'left', ticks: { color: '#fff' } } }
                 }
             });
-        }
-
-        function updateSatellites(logData) {
-            document.querySelectorAll('.satellite, .data-label, .guide-line').forEach(e => e.remove());
-            const wrapper = document.getElementById('chart-wrapper');
-            const metaROE = missionChart.getDatasetMeta(0);
-            
-            metaROE.data.forEach((point, i) => {
-                createSat(wrapper, point.x, point.y, 'sat-green');
-                const stagger = (i % 2 === 0) ? 40 : 70; 
-                createLabel(wrapper, point.x, point.y - stagger, logData[i].dec_summ, 'lbl-decision');
-                createLine(wrapper, point.x, point.y, point.x, point.y - stagger + 15);
-                
-                createLabel(wrapper, point.x, point.y + stagger, logData[i].met_summ, 'lbl-metric');
-                createLine(wrapper, point.x, point.y, point.x, point.y + stagger - 5);
-            });
-        }
-
-        function createSat(parent, x, y, cls) {
-            const el = document.createElement('div'); el.className = \`satellite \${cls}\`;
-            el.style.left = x + 'px'; el.style.top = y + 'px'; parent.appendChild(el);
-        }
-        function createLabel(parent, x, y, text, cls) {
-            const el = document.createElement('div'); el.className = \`data-label \${cls}\`;
-            el.innerText = text; el.style.left = x + 'px'; el.style.top = y + 'px'; parent.appendChild(el);
-        }
-        function createLine(parent, x1, y1, x2, y2) {
-            const height = Math.abs(y2 - y1);
-            const el = document.createElement('div'); el.className = 'guide-line';
-            el.style.height = height + 'px'; el.style.left = x1 + 'px'; el.style.top = Math.min(y1, y2) + 'px';
-            parent.appendChild(el);
         }
 
         socket.on('auth_success', (res) => {
@@ -682,7 +616,7 @@ const frontendCode = `
                 myTeam = res.teamName;
                 teamDataRef = res.teamData;
                 document.getElementById('team-ui').classList.add('active');
-                updTeam(res.teamData, res.state);
+                updTeam(res.teamData);
             }
         });
         
@@ -697,42 +631,21 @@ const frontendCode = `
                 document.getElementById('endgame-screen').style.display = 'flex';
                 const list = document.getElementById('final-scores');
                 list.innerHTML = '';
-                const sorted = Object.keys(s.teams).sort((a,b) => s.teams[b].final_score - s.teams[a].final_score);
-                sorted.forEach((t, i) => {
+                Object.keys(s.teams).forEach(t => {
                     const tm = s.teams[t];
-                    list.innerHTML += \`
-                    <div class="rank-card" style="border-left-color: \${tm.archetype.color}">
-                        <div class="rank-title" style="color:\${tm.archetype.color}">#\${i+1} \${t} : \${tm.archetype.title}</div>
-                        <div class="rank-stats">
-                            SCORE: \${tm.final_score} | 
-                            RAROC: \${tm.raroc.toFixed(1)}% | 
-                            ROE: \${(tm.roe_history.reduce((a,b)=>a+b,0)/tm.roe_history.length).toFixed(1)}% | 
-                            <span style="color:\${tm.capital_ratio < 10 ? '#ff0055' : '#fff'}">
-                                CAPITAL: \${tm.capital_ratio.toFixed(1)}%
-                            </span>
-                        </div>
-                        <div class="feedback-box">
-                            <div class="fb-good">✓ \${tm.commentary.good}</div>
-                            <div class="fb-bad">⚠ \${tm.commentary.bad}</div>
-                        </div>
-                    </div>\`;
+                    list.innerHTML += \`<div class="rank-card"><b>\${t}</b>: \${tm.final_score} (\${tm.archetype.title})</div>\`;
                 });
                 return;
             }
             document.getElementById('rd-ind').innerText = "ROUND " + s.round;
-            const tDiv = document.getElementById('news-feed');
-            tDiv.innerHTML = "";
-            s.news_feed.forEach(n => { tDiv.innerHTML += \`<div class="ticker-item">\${n}</div>\`; });
-            
-            // UPDATE CRO INTEL
+            document.getElementById('news-feed').innerHTML = s.news_feed.map(n=>\`<div class="ticker-item">\${n}</div>\`).join('');
             document.getElementById('cro-vit').innerText = s.cro_data.vital;
-            document.getElementById('cro-cof').innerText = s.cro_data.cof;
             document.getElementById('cro-liq').innerText = s.cro_data.liq;
-
+            
             const btn = document.getElementById('sub-btn');
             if(s.status === 'OPEN') {
                 document.getElementById('lock-overlay').classList.add('hidden'); 
-                btn.disabled = false; btn.innerText = "SUBMIT DECISION";
+                btn.disabled = false; btn.innerText = "SUBMIT STRATEGY";
             } else {
                 btn.disabled = true; btn.innerText = "MARKET CLOSED";
             }
@@ -740,45 +653,26 @@ const frontendCode = `
         });
         
         socket.on('reload_client', () => { location.reload(); });
-
-        socket.on('team_data_update', (msg) => {
-            if(msg.name === myTeam) { teamDataRef = msg.data; updTeam(msg.data, null); }
-        });
-        function updTeam(d, s) {
+        socket.on('team_data_update', (msg) => { if(msg.name === myTeam) { teamDataRef = msg.data; updTeam(msg.data); } });
+        
+        function updTeam(d) {
             document.getElementById('d-roe').innerText = d.roe.toFixed(1) + "%";
             document.getElementById('d-loss').innerText = d.loss_rate.toFixed(1) + "%";
-            document.getElementById('d-prov').innerText = d.provisions.toFixed(1) + "%";
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
-            document.getElementById('d-rec').innerText = "₹" + Math.round(d.receivables) + " Cr";
+            document.getElementById('d-rwa').innerText = "₹" + Math.round(d.rwa);
+            document.getElementById('d-rec').innerText = "₹" + Math.round(d.receivables);
         }
         function updAdmin(s) {
-            document.getElementById('adm-rd').innerText = s.round;
             const l = document.getElementById('adm-list');
             l.innerHTML = \`\`;
             Object.keys(s.teams).forEach(t => {
                 const team = s.teams[t];
-                let decStatus = '<span style="color:var(--red)">WAITING...</span>';
-                let decDetail = '';
-                if(team.decisions[s.round]) {
-                    const d = team.decisions[s.round];
-                    decStatus = '<span style="color:var(--green)">LOCKED</span>';
-                    decDetail = \`<div style="margin-top:5px; font-size:0.8em; color:#aaa; border-top:1px solid #333; padding-top:5px;">
-                        Vol: <b style="color:white">\${d.vol}</b> | Line: <b style="color:white">\${d.line}</b><br>
-                        CLI: <b>\${d.cli}</b> | BT: <b>\${d.bt}</b> | Frz: <b>\${d.freeze}</b>
-                        </div>\`;
-                }
                 l.innerHTML += \`<div class="glass" style="padding:10px;">
-                    <div style="display:flex; justify-content:space-between;">
-                        <div style="color:var(--blue); font-weight:bold; font-size:1.2em;">\${t}</div>
-                        <div>\${decStatus}</div>
-                    </div>
-                    <div style="font-size:0.9em; margin-top:5px;">ROE: \${team.roe.toFixed(1)}% | Cap: \${team.capital_ratio.toFixed(1)}%</div>
-                    <div style="font-size:0.9em;">Receivables: ₹\${Math.round(team.receivables)} Cr</div>
-                    \${decDetail}
+                    <div><b>\${t}</b></div>
+                    <div style="font-size:0.9em;">Cap: \${team.capital_ratio.toFixed(1)}% | RWA: \${Math.round(team.rwa)}</div>
                 </div>\`;
             });
         }
-        window.addEventListener('resize', () => { if(missionChart) { missionChart.resize(); renderOverlay(); } });
     </script>
 </body>
 </html>
