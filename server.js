@@ -1,8 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v22.1 - AMPLIFIED MATH
- * - Fix: Re-tuned math coefficients to make sliders impactful again.
- * - Logic: Steeper curves for OpEx, Yield, and Risk.
- * - Feature: Hard Reset & Zombie Protocol retained.
+ * CREDIT CARD RISK SIMULATION v22.2 - FAIR PLAY
+ * - Math Fix: Reduced Provisioning impact in Crash (prevents double-counting).
+ * - Math Fix: Added Capital Dilution (Growth lowers ratio).
+ * - Tuning: "Sensible Strategy" now scores ~20-22.
  * - Theme: Captain's Room.
  * - Port: 3000
  */
@@ -165,7 +165,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (AMPLIFIED) ---
+// --- 3. MATH ENGINE (CALIBRATED) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
@@ -177,32 +177,27 @@ function runSimulationEngine() {
             dec.line = 'Conservative'; 
         }
 
-        // --- AMPLIFIED INPUTS ---
-        
-        // 1. VOLUME: Steeper curve.
-        // Vol 3 = 1.0x, Vol 5 = 1.25x (Was 1.16)
+        // 1. ANALOG INPUTS
         let volMult = 1 + ((dec.vol - 3) * 0.125); 
         
         let lineRisk = 1.0; let ecFactor = 1.0; 
         if(dec.line==='Conservative') { lineRisk=0.80; volMult-=0.05; ecFactor=0.85; } 
         if(dec.line==='Aggressive') { lineRisk=1.4; volMult+=0.10; ecFactor=1.5; }
         
-        // 2. CLI/BT: Stronger Scaling
         let cliBal = 1 + ((dec.cli - 1) * 0.04); 
-        let cliRisk = 1 + ((dec.cli - 1) * 0.09); // Higher Upsell Risk
-        let btBal = 1 + ((dec.bt - 1) * 0.06); // Stronger BT Growth
+        let cliRisk = 1 + ((dec.cli - 1) * 0.09);
+        let btBal = 1 + ((dec.bt - 1) * 0.06);
         
         let freezeImpact = 1.0; 
         if(dec.freeze==='Selective') freezeImpact=0.97; 
         if(dec.freeze==='Reactive') freezeImpact=0.92;
         
-        let collBenefit = dec.coll * 0.20; // Stronger Collections Benefit (was 0.15)
+        let collBenefit = dec.coll * 0.20; 
         
         const growth = volMult * cliBal * btBal * freezeImpact;
         const macro = sc.id === 'C' ? 0.92 : 1.04; 
         team.receivables = team.receivables * growth * macro;
 
-        // 3. RISK: Exponential Curve for High Volume
         const volRisk = dec.vol > 4 ? (dec.vol * 0.8) : (dec.vol * 0.6);
         const baseRisk = volRisk + (cliRisk * 0.4);
         
@@ -215,19 +210,10 @@ function runSimulationEngine() {
         let rawLoss = (0.5 * histRisk * histRisk * 0.4) * sc.severity; 
         team.loss_rate = Math.max(0.5, rawLoss - collBenefit);
         
-        // 4. P&L (AMPLIFIED SENSITIVITY)
-        
-        // Yield: 18% base.
-        // BT Penalty: -0.6% per point (Was 0.3%). Max BT kills Yield by 3%.
+        // 2. P&L (FAIR PLAY CALIBRATION)
         let grossYield = 0.18 - (dec.bt * 0.006); 
-
         let cof = 0.045; if(sc.id==='B') cof=0.06; if(sc.id==='C') cof=0.085;
-        
-        // OpEx: Steep Efficiency Curve.
-        // Vol 1 = 6.0%. Vol 5 = 2.0%. (1% per point).
         let opExRate = 0.07 - (dec.vol * 0.01); 
-        
-        // Coll Cost: 0.3% per point (Was 0.2%).
         opExRate += (dec.coll * 0.003);
 
         const grossRevenue = team.receivables * grossYield;
@@ -235,22 +221,31 @@ function runSimulationEngine() {
         const opExp = team.receivables * opExRate;
         const creditCost = team.receivables * (team.loss_rate/100);
         
-        team.provisions = currentRiskIndex * (sc.id === 'C' ? 1.5 : 0.8);
+        // FIX: Provisioning Cap in Crisis.
+        // In Scenario C, we shouldn't provision full forward risk if we are already taking massive losses.
+        let provMultiplier = sc.id === 'C' ? 0.9 : 0.8; // Lowered from 1.5 in C
+        team.provisions = currentRiskIndex * provMultiplier;
         const provCost = team.receivables * (team.provisions/100);
 
         const profit = grossRevenue - intExp - opExp - creditCost - provCost;
         
-        if(profit < 0) team.capital_ratio += (profit / team.receivables) * 100; 
-        else team.capital_ratio += 0.2; 
+        // 3. CAPITAL DYNAMICS (NEW REALISM)
+        // Profit adds to ratio, but Growth DILUTES ratio.
+        // Approx: 10% Growth drops ratio by ~1.0%.
+        const growthImpact = (growth - 1.0) * 12.0; // Dilution Factor
+        const profitImpact = (profit / team.receivables) * 100;
+        
+        team.capital_ratio = team.capital_ratio + profitImpact - growthImpact;
 
-        // 5. ZOMBIE PROTOCOL
+        // 4. ZOMBIE PROTOCOL
         let finalEquity = team.receivables * (team.capital_ratio / 100);
         
-        if (team.capital_ratio < 10.0) {
-            const requiredEquity = team.receivables * 0.10;
+        // Lowered Threshold to 9.0 to allow "Sensible Strategy" survival
+        if (team.capital_ratio < 9.0) {
+            const requiredEquity = team.receivables * 0.09;
             const deficit = requiredEquity - finalEquity;
             finalEquity = finalEquity + (deficit * 1.5); 
-            team.capital_ratio = 10.0; 
+            team.capital_ratio = 9.0; 
             team.is_zombie = true; 
         }
 
@@ -334,7 +329,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v22.1 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v22.2 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
