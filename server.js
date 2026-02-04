@@ -1,9 +1,7 @@
 /**
- * CREDIT CARD RISK SIMULATION v23.0 - RWA EDITION
- * - Feature: Split Portfolio (Prime vs Sub-Prime Balances).
- * - Feature: RWA (Risk Weighted Asset) Logic. Sub-Prime costs 3x more Capital than Prime.
- * - Feature: Line Strategy (Reactive vs Proactive) drives Utilization & RWA.
- * - Deleted: Collections Slider.
+ * CREDIT CARD RISK SIMULATION v23.1 - DEBUG EDITION
+ * - Feature: Embedded Admin Controls into Player Screen for single-screen testing.
+ * - Logic: RWA (Risk Weighted Assets) & Segment Mix logic retained.
  * - Math: Solvency Floor 9.0%.
  * - Theme: Captain's Room.
  * - Port: 3000
@@ -33,7 +31,7 @@ const CEO_SCRIPTS = {
 
 const NEWS_DB = {
     'A': [ "BBG: Investors hungry for High-Yield asset backed securities", "CNBC: Consumer spending robust across all segments", "WSJ: Regulatory capital requirements stable" ],
-    'B': [ "BBG: Regulators eyeing 'Unused Credit Lines' risk", "CNBC: Sub-prime delinquencies tick up", "FT: Tier 1 Capital ratios under pressure" ],
+    'B': [ "BBG: Regulators eyeing 'Unused Credit Lines' risk", "CNBC: Sub-prime delinquencies tick up", "FT: Flight to quality begins in bond markets" ],
     'C': [ "ALERT: RECESSION - RISK WEIGHTS SPIKE", "BBG: Banks scramble to raise equity", "WSJ: Sub-prime sector faces liquidity freeze" ]
 };
 
@@ -104,6 +102,7 @@ io.on('connection', (socket) => {
             gameState.status = 'LOBBY';
             gameState.teams = {}; 
             gameState.news_feed = ["SYSTEM: Waiting for market open..."];
+            gameState.cro_data = { vital: "-", cof: "-", liq: "-" };
             
             io.emit('state_update', gameState);
             io.emit('reload_client'); 
@@ -252,28 +251,6 @@ function runSimulationEngine() {
         const profit = grossRev - intExp - opEx - credCost - provCost;
 
         // 7. CAPITAL LOGIC (Equity / RWA)
-        let equity = team.receivables * (team.capital_ratio / 100); // Old Equity
-        // Wait, Capital Ratio is Equity/RWA now. So get old Equity from old RWA?
-        // Let's simplify: Maintain Equity Value.
-        // Recover equity from previous ratio? No, let's track Cumulative Profit.
-        // Re-calculate Equity:
-        // Start Equity was 1000 * 14% = 140. 
-        // We will just accumulate profit into a hidden 'equity_val' tracking var?
-        // To keep it stateless compatible with existing array structure:
-        // We will approximate change.
-        
-        // Better: We need to track actual Equity value to handle the denominator change properly.
-        // Let's reverse engineer for this round:
-        // Current Equity ~= Old RWA * Old Ratio... let's just add profit to "implied equity"
-        // Let's assume current equity is `team.rwa * (team.capital_ratio/100)` BEFORE this round updates? 
-        // No, that's recursive.
-        
-        // FIX: We will estimate Previous Equity = (Previous Receivables * Prev Ratio? No RWA change).
-        // Let's just say: Equity += Profit.
-        // New Ratio = New Equity / New RWA.
-        
-        // We need a stored 'equity' value in the state. I didn't add it to INITIAL_TEAM_STATE.
-        // Hack: We will derive it.
         // Implied Previous Equity = (team.cumulative_profit + 180); // 180 is starting equity (1275 * 14%)
         let implied_equity = 180 + team.cumulative_profit; 
         
@@ -285,8 +262,6 @@ function runSimulationEngine() {
         if (team.capital_ratio < 9.0) {
             const req_equity = team.rwa * 0.09;
             const injection = req_equity - implied_equity;
-            // Penalty: Equity dilution
-            // We don't track stock price, so we mark them Zombie.
             implied_equity += injection; // Bailout
             team.capital_ratio = 9.0;
             team.is_zombie = true;
@@ -350,7 +325,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v23.0 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v23.1 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -419,10 +394,6 @@ const frontendCode = `
                 <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // RWA EDITION</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase; text-align:center;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
-                <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
-                    <input id="aPass" type="password" placeholder="ADMIN KEY" style="padding:5px; background:#111; border:1px solid #444; color:white; text-align:center;">
-                    <button onclick="login('admin')" style="background:none; border:1px solid #666; color:#666; cursor:pointer; padding:5px;">AUTH</button>
-                </div>
             </div>
         </div>
         <div id="team-ui" class="screen" style="background: radial-gradient(circle at center, #1a2c4e 0%, #000 100%);">
@@ -497,25 +468,22 @@ const frontendCode = `
                         <div class="cro-row"><span class="cro-lbl">MARKET PHASE:</span><span id="cro-vit" class="cro-val">-</span></div>
                         <div class="cro-row"><span class="cro-lbl">LIQUIDITY:</span><span id="cro-liq" class="cro-val">-</span></div>
                     </div>
+
+                    <div style="margin-top:auto; padding-top:10px; border-top:1px solid #444;">
+                         <h4 style="color:white; margin:0 0 5px 0; font-size:0.8em;">SYSTEM OVERRIDE (DEBUG)</h4>
+                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
+                            <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="background:#004400; color:white; border:none; padding:5px; cursor:pointer;">START</button>
+                            <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="background:#440000; color:white; border:none; padding:5px; cursor:pointer;">CLOSE</button>
+                            <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="background:#443300; color:white; border:none; padding:5px; cursor:pointer;">CEO</button>
+                            <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="background:#222; color:white; border:1px solid #444; padding:5px; cursor:pointer;">RESET</button>
+                         </div>
+                    </div>
                     
-                    <div style="margin-top:auto;">
+                    <div style="margin-top:10px;">
                         <button class="main-btn" onclick="showMissionLog()" style="border-color:var(--amber); color:var(--amber); font-size:1em;">> VIEW MISSION LOG</button>
                     </div>
                 </div>
             </div>
-        </div>
-        <div id="admin-ui" class="screen" style="padding:20px; overflow-y:auto; background:#111;">
-             <div style="display:flex; justify-content:space-between; margin-bottom:20px;">
-                <h2 style="color:white; margin:0;">FACILITATOR COMMAND</h2>
-                <div>
-                    <span id="adm-rd" style="font-size:2em; margin-right:20px; font-weight:bold; color:var(--amber)">LOBBY</span>
-                    <button onclick="sEmit('admin_action', {type:'RESET_GAME'})" style="padding:10px 20px; background:#333; color:white; border:1px solid #666; cursor:pointer; font-weight:bold; margin-right:10px;">HARD RESET</button>
-                    <button onclick="sEmit('admin_action', {type:'START_ROUND'})" style="padding:10px 20px; background:green; color:white; border:none; cursor:pointer; font-weight:bold;">START ROUND</button>
-                    <button onclick="sEmit('admin_action', {type:'PUSH_CEO'})" style="padding:10px 20px; background:orange; color:white; border:none; cursor:pointer; font-weight:bold;">TRANSMIT CEO ORDERS</button>
-                    <button onclick="sEmit('admin_action', {type:'END_ROUND'})" style="padding:10px 20px; background:red; color:white; border:none; cursor:pointer; font-weight:bold;">CLOSE MARKET</button>
-                </div>
-            </div>
-            <div id="adm-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:15px;"></div>
         </div>
     </div>
     
@@ -610,8 +578,7 @@ const frontendCode = `
         socket.on('auth_success', (res) => {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             if(res.role === 'admin') {
-                document.getElementById('admin-ui').classList.add('active');
-                updAdmin(res.state);
+                // Admin UI hidden/merged
             } else {
                 myTeam = res.teamName;
                 teamDataRef = res.teamData;
@@ -649,7 +616,6 @@ const frontendCode = `
             } else {
                 btn.disabled = true; btn.innerText = "MARKET CLOSED";
             }
-            if(document.getElementById('admin-ui').classList.contains('active')) updAdmin(s);
         });
         
         socket.on('reload_client', () => { location.reload(); });
@@ -661,17 +627,6 @@ const frontendCode = `
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
             document.getElementById('d-rwa').innerText = "₹" + Math.round(d.rwa);
             document.getElementById('d-rec').innerText = "₹" + Math.round(d.receivables);
-        }
-        function updAdmin(s) {
-            const l = document.getElementById('adm-list');
-            l.innerHTML = \`\`;
-            Object.keys(s.teams).forEach(t => {
-                const team = s.teams[t];
-                l.innerHTML += \`<div class="glass" style="padding:10px;">
-                    <div><b>\${t}</b></div>
-                    <div style="font-size:0.9em;">Cap: \${team.capital_ratio.toFixed(1)}% | RWA: \${Math.round(team.rwa)}</div>
-                </div>\`;
-            });
         }
     </script>
 </body>
