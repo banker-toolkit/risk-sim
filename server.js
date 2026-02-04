@@ -1,7 +1,8 @@
 /**
- * CREDIT CARD RISK SIMULATION v23.1 - DEBUG EDITION
- * - Feature: Embedded Admin Controls into Player Screen for single-screen testing.
- * - Logic: RWA (Risk Weighted Assets) & Segment Mix logic retained.
+ * CREDIT CARD RISK SIMULATION v23.2 - PROFESSIONAL EDITION
+ * - Feature: Restored BT (Balance Transfer) and CLI (Spend Stimulation) Levers.
+ * - Logic: "Line Strategy" sets RWA cap; "CLI" drives utilization.
+ * - Tuning: Adjusted Capital Accumulation so "Profitable Growth" builds equity instead of burning it.
  * - Math: Solvency Floor 9.0%.
  * - Theme: Captain's Room.
  * - Port: 3000
@@ -18,12 +19,12 @@ const ADMIN_PASSWORD = "admin";
 // --- 1. DATABASES ---
 
 const CEO_SCRIPTS = {
-    1: "Welcome to Q1. The Board wants 'Efficient Growth.' That means high ROE. The Sub-Prime book yields 24%—that's where the money is. I want you to ramp up the 'High Yield' acquisition engine. Don't worry about capital charges yet; we have plenty of buffer.",
-    2: "Revenue is looking good, but our loan utilization is too low. We have too many customers sitting on empty credit lines. Switch to a 'Proactive' Line Strategy. Push the limits. Make them spend.",
+    1: "Welcome to Q1. The Board wants 'Efficient Growth.' That means high ROE. The Sub-Prime book yields 26%—that's where the money is. I want you to ramp up the 'High Yield' acquisition engine. Use Balance Transfers to steal share if you have to.",
+    2: "Revenue is looking good, but our loan utilization could be better. You have the 'Spend Stimulation' lever—use it. Get people transacting. And watch that asset mix; don't let the RWA get too bloated unless the yield justifies it.",
     3: "Analysts are asking about our Asset Mix. They say we look too heavy on the risky side. Ignore them. As long as the economy holds, that Sub-Prime book is a gold mine. Keep the pedal down.",
     4: "Inflation is ticking up. I'm seeing early stress in the Sub-Prime vintage. I'm not saying stop, but... maybe start layering in some Prime volume to dilute the risk? Just don't kill the yield.",
-    5: "Okay, the RWA (Risk Weighted Assets) number is getting ugly. We are burning capital too fast. Every dollar of Sub-Prime you book is eating 3x the capital of a Prime dollar. You need to balance the mix before we hit the regulatory floor.",
-    6: "Market turns are unpredictable. If we enter a recession with a Sub-Prime heavy book and Proactive lines, we are dead. The 'Unused Exposure' will kill us. Consider switching the Line Strategy to Reactive to save capital.",
+    5: "Okay, the RWA (Risk Weighted Assets) number is getting ugly. We are burning capital. Every dollar of Sub-Prime you book is eating 2.5x the capital of a Prime dollar. You need to balance the mix before we hit the regulatory floor.",
+    6: "Market turns are unpredictable. If we enter a recession with a Sub-Prime heavy book and Proactive lines, we are dead. Consider switching the Line Strategy to Reactive to save capital.",
     7: "CRASH. UNEMPLOYMENT 8%. The Sub-Prime book is melting down. Losses are skyrocketing. If you have Prime assets, they might save us. If you are 100% Sub-Prime... well, it was nice knowing you.",
     8: "Capital Preservation Mode. We are fighting for solvency. Stop booking high-RWA assets immediately. Only book Prime if you must. We need to shrink the denominator (RWA) to survive.",
     9: "We are crawling out of the wreckage. Look at the survivors. The ones who balanced their RWA are buying the ones who chased yield. Let's see which one you are."
@@ -31,7 +32,7 @@ const CEO_SCRIPTS = {
 
 const NEWS_DB = {
     'A': [ "BBG: Investors hungry for High-Yield asset backed securities", "CNBC: Consumer spending robust across all segments", "WSJ: Regulatory capital requirements stable" ],
-    'B': [ "BBG: Regulators eyeing 'Unused Credit Lines' risk", "CNBC: Sub-prime delinquencies tick up", "FT: Flight to quality begins in bond markets" ],
+    'B': [ "BBG: Regulators eyeing 'Unused Credit Lines' risk", "CNBC: Sub-prime delinquencies tick up", "FT: Tier 1 Capital ratios under pressure" ],
     'C': [ "ALERT: RECESSION - RISK WEIGHTS SPIKE", "BBG: Banks scramble to raise equity", "WSJ: Sub-prime sector faces liquidity freeze" ]
 };
 
@@ -41,13 +42,12 @@ const SCENARIOS = {
     'C': { id: 'C', name: 'Shock', severity: 2.2 } 
 };
 
-// Initial State now tracks TWO portfolios
 const INITIAL_TEAM_STATE = {
-    prime_bal: 700,         // Safe, Low Yield
-    sub_bal: 300,           // Risky, High Yield
-    receivables: 1000,      // Total
-    rwa: 1275,              // Risk Weighted Assets (700*0.75 + 300*2.5)
-    capital_ratio: 14.0,    // Equity / RWA
+    prime_bal: 700,         
+    sub_bal: 300,           
+    receivables: 1000,      
+    rwa: 1275,              
+    capital_ratio: 14.0,    
     roe: 12.0,
     loss_rate: 2.0,
     provisions: 2.0,
@@ -126,7 +126,6 @@ io.on('connection', (socket) => {
 
             gameState.news_feed = NEWS_DB[gameState.scenario].sort(() => 0.5 - Math.random()).slice(0, 3);
             
-            // INTELLIGENCE
             let intel = { vital: "Stable", cof: "Low", liq: "High" };
             if (gameState.round > 3) intel = { vital: "Sub-Prime Stress", cof: "Rising", liq: "Tightening" };
             if (gameState.round > 6) intel = { vital: "CRASH", cof: "Spiking", liq: "FROZEN" };
@@ -161,42 +160,50 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- 3. MATH ENGINE (RWA EDITION) ---
+// --- 3. MATH ENGINE (PROFESSIONAL EDITION) ---
 function runSimulationEngine() {
     const sc = SCENARIOS[gameState.scenario];
     Object.keys(gameState.teams).forEach(teamName => {
         const team = gameState.teams[teamName];
-        const dec = team.decisions[gameState.round] || { vol_p: 3, vol_s: 1, line: 'Reactive', bt: 1, freeze: 'None' };
+        const dec = team.decisions[gameState.round] || { vol_p: 3, vol_s: 1, line: 'Reactive', bt: 1, cli: 1, freeze: 'None' };
 
         if (team.is_zombie) {
-            dec.vol_p = 1; dec.vol_s = 0; dec.line = 'Reactive';
+            dec.vol_p = 1; dec.vol_s = 0; dec.line = 'Reactive'; dec.bt=1; dec.cli=1;
         }
 
-        // 1. RUNOFF (Existing books decay)
+        // 1. RUNOFF
         team.prime_bal *= 0.90; 
-        team.sub_bal *= 0.88;   // Sub-prime churns faster
+        team.sub_bal *= 0.88;
 
-        // 2. NEW BOOKINGS (Based on Sliders)
-        // Prime: Volume 1-5 => 20cr to 100cr
+        // 2. NEW BOOKINGS (ACQUISITION)
         const new_prime = dec.vol_p * 25 * (sc.id==='C'?0.5:1.0);
-        // Sub: Volume 1-5 => 20cr to 100cr
-        const new_sub = dec.vol_s * 25 * (sc.id==='C'?0.3:1.0); // Harder to find subprime in crash
+        const new_sub = dec.vol_s * 25 * (sc.id==='C'?0.3:1.0);
 
         team.prime_bal += new_prime;
         team.sub_bal += new_sub;
 
-        // 3. LINE STRATEGY IMPACT (Utilization & RWA)
+        // 3. LEVERS (BT & CLI & LINE)
+        // Line Strategy: Sets RWA and Cap on Growth
         let utilBoost = 1.0; 
         let rwaPenalty = 1.0; 
 
         if (dec.line === 'Proactive') {
-            utilBoost = 1.08;   // +8% Balances (Revenue)
-            rwaPenalty = 1.15;  // +15% RWA (Capital Hit due to Unused Exposure)
+            utilBoost = 1.05;   
+            rwaPenalty = 1.15;  // Capital Hit
         } else {
-            // Reactive
-            utilBoost = 1.02;   // +2% Balances
-            rwaPenalty = 1.0;   // No Penalty
+            utilBoost = 1.01;
+            rwaPenalty = 1.0;
         }
+
+        // CLI (Spend Stimulation): Drives Volume + Risk
+        // Range 1-5. 
+        const cliFactor = 1 + ((dec.cli - 1) * 0.02); // +2% per level
+        utilBoost *= cliFactor;
+        
+        // BT (Balance Transfer): Drives Volume + Lowers Yield
+        // Range 1-5.
+        const btFactor = 1 + ((dec.bt - 1) * 0.03); // +3% per level
+        utilBoost *= btFactor;
 
         team.prime_bal *= utilBoost;
         team.sub_bal *= utilBoost;
@@ -204,34 +211,35 @@ function runSimulationEngine() {
         // FREEZE IMPACT
         if(dec.freeze !== 'None') {
             const cut = dec.freeze === 'Reactive' ? 0.90 : 0.95;
-            team.sub_bal *= cut; // Freeze hits Sub-prime hardest
+            team.sub_bal *= cut; 
             team.prime_bal *= 0.98;
         }
 
         team.receivables = team.prime_bal + team.sub_bal;
 
-        // 4. CALCULATE RWA (THE KEY METRIC)
-        // Prime Weight: 75%
-        // Sub Weight: 250%
+        // 4. RWA CALCULATION
         const prime_rwa = team.prime_bal * 0.75;
         const sub_rwa = team.sub_bal * 2.50;
-        
         team.rwa = (prime_rwa + sub_rwa) * rwaPenalty;
 
         // 5. BLENDED METRICS
         const mix_prime = team.prime_bal / team.receivables;
         const mix_sub = team.sub_bal / team.receivables;
 
-        // YIELD
-        // Prime: 8%, Sub: 24%
-        const yield_rate = (mix_prime * 0.08) + (mix_sub * 0.24);
+        // YIELD & COSTS
+        // Sub-prime yield boosted to 26% to reward risk-taking in early rounds
+        let base_yield = (mix_prime * 0.08) + (mix_sub * 0.26); 
         
-        // LOSS RATES (Scenario Dependent)
+        // BT Penalty: High BT lowers yield significantly (0.5% per level)
+        base_yield -= ((dec.bt - 1) * 0.005);
+
         let loss_p = 0.01; let loss_s = 0.05;
         if(sc.id === 'B') { loss_p = 0.015; loss_s = 0.08; }
-        if(sc.id === 'C') { loss_p = 0.025; loss_s = 0.16; } // Crash hits Sub-prime hard
+        if(sc.id === 'C') { loss_p = 0.025; loss_s = 0.16; } 
         
-        // Freeze Benefit
+        // CLI Risk Penalty (Proactive stimulation increases losses)
+        if(dec.cli > 3) loss_s *= 1.1;
+
         if(dec.freeze === 'Selective') loss_s *= 0.85;
         if(dec.freeze === 'Reactive') loss_s *= 0.70;
 
@@ -239,21 +247,24 @@ function runSimulationEngine() {
         team.loss_rate = w_loss * 100;
 
         // 6. P&L
-        const grossRev = team.receivables * yield_rate;
+        const grossRev = team.receivables * base_yield;
         const intExp = team.receivables * (sc.id==='A'?0.04 : 0.06);
-        const opEx = team.receivables * 0.025; // Fixed OpEx 2.5%
+        const opEx = team.receivables * 0.025; 
         const credCost = team.receivables * w_loss;
         
-        // Provisions (Forward looking)
-        let prov_factor = sc.id === 'C' ? 0.5 : 1.0; // Don't double count in crash
+        let prov_factor = sc.id === 'C' ? 0.5 : 1.0; 
         const provCost = credCost * prov_factor; 
 
         const profit = grossRev - intExp - opEx - credCost - provCost;
 
-        // 7. CAPITAL LOGIC (Equity / RWA)
-        // Implied Previous Equity = (team.cumulative_profit + 180); // 180 is starting equity (1275 * 14%)
-        let implied_equity = 180 + team.cumulative_profit; 
+        // 7. CAPITAL LOGIC (FIXED)
+        // We now add profit FULLY to equity. 
+        // Starting Equity = 180 (approx). 
+        // If profit is 40, Equity becomes 220. 
+        // If RWA grows from 1275 to 1500... Ratio = 220/1500 = 14.6%. (Healthy)
+        // Previously, "growthImpact" was arbitrarily subtracting equity. Removed that.
         
+        let implied_equity = 180 + team.cumulative_profit; 
         implied_equity += profit; 
         
         // ZOMBIE CHECK (9.0% Floor)
@@ -262,14 +273,14 @@ function runSimulationEngine() {
         if (team.capital_ratio < 9.0) {
             const req_equity = team.rwa * 0.09;
             const injection = req_equity - implied_equity;
-            implied_equity += injection; // Bailout
+            implied_equity += injection; 
             team.capital_ratio = 9.0;
             team.is_zombie = true;
         }
 
         team.roe = (profit / implied_equity) * 100;
         team.cumulative_profit += profit;
-        team.cumulative_capital_usage += (team.rwa * 0.12); // Cost of Capital charge
+        team.cumulative_capital_usage += (team.rwa * 0.12); 
         
         team.provisions = (provCost / team.receivables) * 100;
 
@@ -286,7 +297,7 @@ function runSimulationEngine() {
             round: gameState.round, scenario: gameState.scenario,
             dec_summ: finalLabel,
             met_summ: `Loss:${team.loss_rate.toFixed(1)}% | RWA:${Math.round(team.rwa)}`,
-            decision: `Strat:${dec.line}`, impact: `Cap:${team.capital_ratio.toFixed(1)}%`
+            decision: `BT:${dec.bt} | CLI:${dec.cli}`, impact: `Cap:${team.capital_ratio.toFixed(1)}%`
         });
     });
 }
@@ -305,18 +316,22 @@ function calculateFinalScores() {
         let good = "You survived.";
         let bad = "Average performance.";
 
-        if (score > 18 && !team.is_zombie) {
+        if (score > 25 && !team.is_zombie) {
             title = "THE ARCHITECT"; color = "#00ff9d";
-            good = "Perfect RWA Optimization.";
-            bad = "You mastered the capital equation.";
+            good = "You played the cycle perfectly.";
+            bad = "High profit, safe capital.";
         } else if (team.is_zombie) {
             title = "THE ZOMBIE BANK"; color = "#ff0055";
             good = "You generated revenue.";
-            bad = "But you ignored Capital Consumption (RWA).";
+            bad = "But you ran out of capital.";
+        } else if (avgRoe > 20) {
+            title = "THE ADRENALINE JUNKIE"; color = "#ffaa00";
+            good = "Massive returns.";
+            bad = "Too close to the edge.";
         } else if (team.capital_ratio > 20) {
             title = "THE HOARDER"; color = "#00f3ff";
             good = "Safe.";
-            bad = "Inefficient. You sat on cash.";
+            bad = "Inefficient use of cash.";
         } 
 
         team.final_score = Math.round(score * 10) / 10;
@@ -325,7 +340,7 @@ function calculateFinalScores() {
     });
 }
 
-http.listen(PORT, () => console.log(`v23.1 Running on http://localhost:${PORT}`));
+http.listen(PORT, () => console.log(`v23.2 Running on http://localhost:${PORT}`));
 
 // --- 4. FRONTEND ---
 const frontendCode = `
@@ -361,10 +376,6 @@ const frontendCode = `
         .btn-opt.selected { background: var(--blue); color: #000; font-weight: bold; border-color:var(--blue); box-shadow: 0 0 10px var(--blue); }
         input[type=range] { width: 100%; accent-color: var(--blue); margin-top:5px; cursor:pointer; }
         
-        /* New RWA Meter */
-        .rwa-meter { height: 10px; background: #333; width: 100%; margin-top:5px; position:relative; }
-        .rwa-fill { height:100%; background: linear-gradient(90deg, #00ff9d, #ffaa00, #ff0055); width: 0%; transition: 0.5s; }
-
         #mission-control { position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:2000; background: #050810; display:none; flex-direction:column; padding:20px; box-sizing:border-box; overflow:hidden; }
         #mission-control.open { display:flex; }
         
@@ -391,7 +402,7 @@ const frontendCode = `
     <div id="main-container">
         <div id="login-screen" class="screen active" style="justify-content:center; align-items:center; background:black;">
             <div class="glass" style="width: 320px; text-align: center;">
-                <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // RWA EDITION</h2>
+                <h2 style="color:var(--blue); margin-top:0; border-bottom:1px solid #333; padding-bottom:10px;">CAPTAIN'S ROOM // PROFESSIONAL</h2>
                 <input id="tName" placeholder="ENTER CALLSIGN" style="padding:15px; width:85%; margin-bottom:15px; background:#111; border:1px solid #444; color:var(--green); font-family:monospace; font-size:1.1em; text-transform:uppercase; text-align:center;">
                 <button onclick="login('team')" class="main-btn">INITIATE UPLINK</button>
             </div>
@@ -413,42 +424,53 @@ const frontendCode = `
                         <div style="color:white; margin-top:20px;">Computing RWA...</div>
                     </div>
                     <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--blue); padding-bottom:10px; margin-bottom:15px; flex-shrink:0;">
-                        <h3 style="margin:0; color:white;">ASSET GENERATION</h3>
+                        <h3 style="margin:0; color:white;">STRATEGIC CONTROLS</h3>
                         <div id="rd-ind" style="color:var(--amber); font-weight:bold;">ROUND 0</div>
                     </div>
                     <div class="control-scroll-area">
                         <div class="control-row">
                             <div style="display:flex; justify-content:space-between;">
-                                <label style="color:var(--green)">1. PRIME / SUPER-PRIME BOOKING</label>
+                                <label style="color:var(--green)">1. PRIME BOOKING (VOL)</label>
                                 <span id="ctx-vp" style="color:var(--green); font-weight:bold;">3.0</span>
                             </div>
-                            <div style="font-size:0.8em; color:#888;">Low Yield (8%) | Low Risk | <span style="color:#00ff9d">RWA: 75%</span></div>
                             <input type="range" id="i-vp" min="0" max="5" value="3" step="0.5" oninput="updContext('i-vp', 'ctx-vp')">
                         </div>
 
                         <div class="control-row">
                             <div style="display:flex; justify-content:space-between;">
-                                <label style="color:var(--red)">2. SUB-PRIME / HIGH YIELD BOOKING</label>
+                                <label style="color:var(--red)">2. SUB-PRIME BOOKING (VOL)</label>
                                 <span id="ctx-vs" style="color:var(--red); font-weight:bold;">1.0</span>
                             </div>
-                            <div style="font-size:0.8em; color:#888;">High Yield (24%) | High Risk | <span style="color:#ff0055">RWA: 250%</span></div>
                             <input type="range" id="i-vs" min="0" max="5" value="1" step="0.5" oninput="updContext('i-vs', 'ctx-vs')">
                         </div>
 
                         <div class="control-row">
-                            <label>3. LINE ASSIGNMENT STRATEGY</label>
+                            <label>3. LINE ASSIGNMENT POLICY</label>
                             <div class="btn-group" id="grp-line">
                                 <div class="btn-opt selected" onclick="selBtn('grp-line', 'Reactive')">REACTIVE</div>
                                 <div class="btn-opt" onclick="selBtn('grp-line', 'Proactive')">PROACTIVE</div>
                             </div>
-                            <div style="font-size:0.8em; color:#888; margin-top:5px;">
-                                <span id="txt-line">Low RWA Impact. Slow Utilization.</span>
+                        </div>
+
+                        <div class="control-row">
+                            <div style="display:flex; justify-content:space-between;">
+                                <label>4. BALANCE TRANSFERS (BT)</label>
+                                <span id="ctx-bt" style="color:var(--blue)">1.0</span>
                             </div>
+                            <input type="range" id="i-bt" min="1" max="5" value="1" step="0.5" oninput="updContext('i-bt', 'ctx-bt')">
+                        </div>
+
+                        <div class="control-row">
+                            <div style="display:flex; justify-content:space-between;">
+                                <label>5. SPEND STIMULATION (CLI)</label>
+                                <span id="ctx-cli" style="color:var(--blue)">1.0</span>
+                            </div>
+                            <input type="range" id="i-cli" min="1" max="5" value="1" step="0.5" oninput="updContext('i-cli', 'ctx-cli')">
                         </div>
 
                         <div class="control-row">
                              <div style="display:flex; justify-content:space-between;">
-                                <label>4. PORTFOLIO ACTIONS (FREEZE)</label>
+                                <label>6. PORTFOLIO ACTIONS (FREEZE)</label>
                             </div>
                             <div class="btn-group" id="grp-frz">
                                 <div class="btn-opt selected" onclick="selBtn('grp-frz', 'None')">None</div>
@@ -526,11 +548,7 @@ const frontendCode = `
         function selBtn(grp, val) {
             document.querySelectorAll('#'+grp+' .btn-opt').forEach(b => b.classList.remove('selected'));
             event.target.classList.add('selected');
-            if(grp === 'grp-line') {
-                decisions.line = val;
-                document.getElementById('txt-line').innerText = val==='Proactive' ? "High RWA Impact! (+15%). High Utilization." : "Low RWA Impact. Slow Utilization.";
-                document.getElementById('txt-line').style.color = val==='Proactive' ? "#ff0055" : "#888";
-            }
+            if(grp === 'grp-line') decisions.line = val;
             if(grp === 'grp-frz') decisions.freeze = val;
         }
         function updContext(id, labelId) { document.getElementById(labelId).innerText = document.getElementById(id).value; }
@@ -539,8 +557,9 @@ const frontendCode = `
                 vol_p: document.getElementById('i-vp').value,
                 vol_s: document.getElementById('i-vs').value,
                 line: decisions.line,
-                freeze: decisions.freeze,
-                bt: 1, cli: 1, coll: 3 // Defaults for now
+                bt: document.getElementById('i-bt').value,
+                cli: document.getElementById('i-cli').value,
+                freeze: decisions.freeze
             };
             sEmit('submit_decision', data);
             document.getElementById('lock-overlay').classList.remove('hidden');
@@ -578,7 +597,8 @@ const frontendCode = `
         socket.on('auth_success', (res) => {
             document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
             if(res.role === 'admin') {
-                // Admin UI hidden/merged
+                document.getElementById('admin-ui').classList.add('active');
+                updAdmin(res.state);
             } else {
                 myTeam = res.teamName;
                 teamDataRef = res.teamData;
@@ -616,6 +636,7 @@ const frontendCode = `
             } else {
                 btn.disabled = true; btn.innerText = "MARKET CLOSED";
             }
+            if(document.getElementById('admin-ui').classList.contains('active')) updAdmin(s);
         });
         
         socket.on('reload_client', () => { location.reload(); });
@@ -627,6 +648,17 @@ const frontendCode = `
             document.getElementById('d-cap').innerText = d.capital_ratio.toFixed(1) + "%";
             document.getElementById('d-rwa').innerText = "₹" + Math.round(d.rwa);
             document.getElementById('d-rec').innerText = "₹" + Math.round(d.receivables);
+        }
+        function updAdmin(s) {
+            const l = document.getElementById('adm-list');
+            l.innerHTML = \`\`;
+            Object.keys(s.teams).forEach(t => {
+                const team = s.teams[t];
+                l.innerHTML += \`<div class="glass" style="padding:10px;">
+                    <div><b>\${t}</b></div>
+                    <div style="font-size:0.9em;">Cap: \${team.capital_ratio.toFixed(1)}% | RWA: \${Math.round(team.rwa)}</div>
+                </div>\`;
+            });
         }
     </script>
 </body>
